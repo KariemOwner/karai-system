@@ -2,281 +2,227 @@ import streamlit as st
 import google.generativeai as genai
 from PIL import Image
 import os
-import json
+import io
+import uuid
+import requests
+import urllib.parse
 
-# --- 1. CONFIGURATION HARUS PALING ATAS ---
-st.set_page_config(page_title="KarAI - Prototype 1", page_icon="K", layout="wide", initial_sidebar_state="expanded")
+# --- 1. CONFIGURATION ---
+st.set_page_config(page_title="KarAI - Prototype 3.0", page_icon="K", layout="wide", initial_sidebar_state="expanded")
 
-# --- 2. CONFIG LOGIC & DICTIONARY MODEL ---
-model_configs = {
-    "⚡ Karai Basic": {
-        "api_name": "gemini-2.5-flash-lite",
-        "desc": "Jawab sesingkat dan sepadat mungkin, jangan berikan penjelasan panjang. Mirip seperti cuplikan pencarian web."
-    },
-    "🧠 Karai Expert": {
-        "api_name": "gemini-2.5-pro",
-        "desc": "Jawab dengan sangat mendalam, teknis, dan step-by-step. Gunakan logika tingkat tinggi."
-    },
-    "🎨 Karai Creative": {
-        "api_name": "gemini-3.5-flash",
-        "desc": "Jawab dengan gaya yang kreatif, santai, namun terstruktur. Berikan ide-ide out of the box."
-    },
-    "🔥 Karai Creative S": {
-        "api_name": "gemini-2.0-flash",
-        "desc": "Berpikir cepat namun mendalam menggunakan basis arsitektur Flash ter-update. Output luwes layaknya manusia."
-    },
-    "🌟 Karai Creative X": {
-        "api_name": "gemini-2.5-pro",
-        "desc": "Model tertinggi dengan penalaran Pro tingkat lanjut yang sangat kompleks, analitis, dan detail maksimal."
-    }
-}
-
-# --- 3. THEME & CSS KUSTOM (Futuristic B&W - Micro Logo) ---
+# --- 2. THEME & CSS KUSTOM ---
 st.markdown("""
 <style>
-    /* Main Background & Text Color */
-    .stApp {
-        background-color: #000000;
-        color: #FFFFFF;
-        font-family: 'Courier New', Courier, monospace;
-    }
-    
-    /* Sidebar Styling */
-    [data-testid="stSidebar"] {
-        background-color: #0a0a0a;
-        border-right: 1px solid #222222;
-    }
-    
-    /* Center and Style the MICRO LOGO */
-    [data-testid="stSidebar"] div.stImage {
-        display: flex;
-        justify-content: left;
-        margin-top: -40px;
-        margin-bottom: -20px;
-    }
-    [data-testid="stSidebar"] div.stImage img {
-        border-radius: 50%;
-        border: 1px solid #555555; 
-        width: 35px !important;  /* Ukuran logo kecil elegan */
-        height: 35px !important;
-        object-fit: cover;
-    }
-
-    /* Mengubah warna teks judul utama */
-    h1.main-title {
-        color: #FFFFFF !important;
-        text-transform: uppercase;
-        letter-spacing: 2px;
-        font-weight: bold;
-        font-size: 1.8rem !important;
-        margin-bottom: 0px !important;
-        padding-bottom: 0px !important;
-    }
-    p.sub-title {
-        color: #666666 !important;
-        font-size: 0.8rem !important;
-        margin-top: 0px !important;
-        padding-top: 0px !important;
-        letter-spacing: 1px;
-    }
-
-    /* Sidebar headers */
-    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {
-        color: #FFFFFF !important;
-        font-size: 1rem !important;
-    }
-
-    /* Mempercantik Input Elements */
-    .stSelectbox div[data-baseweb="select"] > div, .stTextInput input {
-        background-color: #111111;
-        border: 1px solid #333333;
-        color: white;
-    }
-
-    /* Mempercantik Info/Success Box */
-    .stAlert {
-        background-color: #111111;
-        color: #FFFFFF;
-        border: 1px solid #333333;
-    }
-
-    /* CSS Kustom untuk Tampilan Pesan Chat (Chat Bubble) */
-    .stChatMessage.user {
-        background-color: #111111;
-        border-radius: 15px 15px 0px 15px;
-        border: 1px solid #222222;
-        color: white;
-        margin-bottom: 15px;
-    }
-    .stChatMessage.assistant {
-        background-color: transparent;
-        border-radius: 15px 15px 15px 0px;
-        color: white;
-        margin-bottom: 15px;
-    }
+    .stApp { font-family: 'Courier New', Courier, monospace; }
+    [data-testid="stSidebar"] div.stImage { display: flex; justify-content: left; margin-top: -40px; margin-bottom: -20px; }
+    [data-testid="stSidebar"] div.stImage img { border-radius: 50%; border: 1px solid var(--text-color); width: 35px !important; height: 35px !important; object-fit: cover; }
+    h1.main-title { color: var(--text-color) !important; text-transform: uppercase; letter-spacing: 2px; font-weight: bold; font-size: 1.8rem !important; margin-bottom: 0px !important; padding-bottom: 0px !important; }
+    p.sub-title { color: gray !important; font-size: 0.8rem !important; margin-top: 0px !important; padding-top: 0px !important; letter-spacing: 1px; }
+    .stChatMessage.user { background-color: var(--secondary-background-color); border-radius: 15px 15px 0px 15px; border: 1px solid var(--border-color); margin-bottom: 15px; }
+    .stChatMessage.assistant { background-color: transparent; border-radius: 15px 15px 15px 0px; margin-bottom: 15px; }
+    .google-btn { width:100%; padding:12px; background-color:#4285F4; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer; text-align:center; font-family: sans-serif; text-decoration: none; display: inline-block; }
+    .google-btn:hover { background-color:#3367D6; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 4. SESSION STATE INITIALIZATION ---
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-if "username" not in st.session_state:
-    st.session_state.username = ""
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "is_premium" not in st.session_state:
-    st.session_state.is_premium = False
-if "total_tokens" not in st.session_state:
-    st.session_state.total_tokens = 0
+# --- 3. SESSION STATE ---
+if "logged_in" not in st.session_state: st.session_state.logged_in = False
+if "user_email" not in st.session_state: st.session_state.user_email = ""
+if "user_name" not in st.session_state: st.session_state.user_name = ""
+if "is_premium" not in st.session_state: st.session_state.is_premium = False
+if "messages" not in st.session_state: st.session_state.messages = []
+if "total_tokens" not in st.session_state: st.session_state.total_tokens = 0
+if "uploader_key" not in st.session_state: st.session_state.uploader_key = str(uuid.uuid4())
+if "db_loaded" not in st.session_state: st.session_state.db_loaded = False
+
+# --- 4. SECRETS & CLOUD KEYS ---
+api_key_env = st.secrets.get("GOOGLE_API_KEY", "")
+client_id = st.secrets.get("GOOGLE_CLIENT_ID", "")
+client_secret = st.secrets.get("GOOGLE_CLIENT_SECRET", "")
+firebase_url = st.secrets.get("FIREBASE_DB_URL", "")
+redirect_uri = "https://karaiprototype1.streamlit.app" 
 
 PREMIUM_LICENSE_KEY = "KARAI-PRO-1337"
 
-# --- 5. LOGIN GATEWAY (SISTEM MOCKUP GRATIS) ---
+# --- 5. FIREBASE DATABASE LOGIC ---
+def save_chat_to_firebase(email, messages):
+    if not firebase_url: return
+    safe_email = email.replace(".", "_").replace("@", "_")
+    url = f"{firebase_url}/chats/{safe_email}.json"
+    # Filter gambar biar gak menuh-menuhin database, kita simpan teksnya aja
+    clean_messages = [{"role": m["role"], "content": m["content"]} for m in messages]
+    try: requests.put(url, json=clean_messages)
+    except: pass
+
+def load_chat_from_firebase(email):
+    if not firebase_url: return []
+    safe_email = email.replace(".", "_").replace("@", "_")
+    url = f"{firebase_url}/chats/{safe_email}.json"
+    try:
+        res = requests.get(url)
+        if res.status_code == 200 and res.json():
+            return res.json()
+    except: pass
+    return []
+
+# --- 6. GOOGLE OAUTH LOGIN LOGIC ---
+# Cek apakah Google ngebanting user balik bawa kode rahasia
+if "code" in st.query_params and not st.session_state.logged_in:
+    code = st.query_params["code"]
+    
+    # Tuker kode dengan Token Akses Google
+    token_url = "https://oauth2.googleapis.com/token"
+    data = {
+        "code": code,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": redirect_uri,
+        "grant_type": "authorization_code"
+    }
+    res = requests.post(token_url, data=data)
+    access_token = res.json().get("access_token")
+    
+    if access_token:
+        # Ambil data profil (Nama & Email)
+        user_info_url = "https://www.googleapis.com/oauth2/v1/userinfo"
+        headers = {"Authorization": f"Bearer {access_token}"}
+        user_res = requests.get(user_info_url, headers=headers).json()
+        
+        st.session_state.logged_in = True
+        st.session_state.user_email = user_res.get("email", "")
+        st.session_state.user_name = user_res.get("name", "User")
+        
+        # Berikan status Premium otomatis untuk email lu
+        st.session_state.is_premium = True if "ikram" in st.session_state.user_email.lower() else False
+        
+        # Bersihkan URL biar kodenya gak kepakai dua kali
+        st.query_params.clear()
+        st.rerun()
+
+# TAMPILAN GERBANG LOGIN
 if not st.session_state.logged_in:
-    st.markdown("<h1 style='text-align: center; color: white; margin-top: 10vh;'>KarAI PROTOTYPE 1</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #666;'>Futuristic Intelligence by Kariem</p>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; margin-top: 10vh;' class='main-title'>KarAI PROTOTYPE 3.0</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center;' class='sub-title'>Secured Intelligence by Kariem</p>", unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.info("Sistem terkunci. Silakan identifikasi diri lu untuk masuk ke dalam terminal KarAI.")
-        login_input = st.text_input("Email Google / Username:")
-        if st.button("🌐 Login via Google Auth", use_container_width=True):
-            if login_input:
-                st.session_state.logged_in = True
-                st.session_state.username = login_input
-                st.rerun()
-            else:
-                st.error("Masukkan Email/Username terlebih dahulu!")
-    st.stop() # Hentikan proses render aplikasi kalau belum login
+        if client_id and client_secret:
+            st.success("🔒 Sistem Diamankan oleh Google OAuth 2.0")
+            # Bikin link Login Google asli
+            auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?client_id={client_id}&redirect_uri={redirect_uri}&response_type=code&scope=openid%20email%20profile"
+            st.markdown(f'<a href="{auth_url}" target="_self" class="google-btn">🌐 Sign in with Google</a>', unsafe_allow_html=True)
+        else:
+            st.error("Google Auth Credentials belum terpasang di Secrets.")
+    st.stop()
 
-# --- 6. API KEY RETRIEVAL LOGIC ---
-api_key_env = st.secrets.get("GOOGLE_API_KEY", "")
-if not api_key_env:
-    api_key_env = st.secrets.get("env", {}).get("GOOGLE_API_KEY", os.environ.get("GOOGLE_API_KEY", ""))
-api_key_env = api_key_env.strip().strip('"').strip("'")
+# --- 7. LOAD HISTORY DARI CLOUD DB (HANYA SEKALI PAS LOGIN) ---
+if st.session_state.logged_in and not st.session_state.db_loaded:
+    cloud_history = load_chat_from_firebase(st.session_state.user_email)
+    if cloud_history:
+        st.session_state.messages = cloud_history
+    st.session_state.db_loaded = True
 
-# --- 7. SIDEBAR - BRANDING, AUTH & CONFIGURATION ---
+# --- 8. CONFIG LOGIC & DICTIONARY MODEL ---
+model_configs = {
+    "⚡ Karai Basic": {"api_name": "gemini-2.5-flash-lite", "desc": "Jawab sesingkat mungkin. Mirip hasil web."},
+    "🧠 Karai Expert": {"api_name": "gemini-2.5-pro", "desc": "Jawab sangat mendalam, teknis, step-by-step."},
+    "🎨 Karai Creative": {"api_name": "gemini-3.5-flash", "desc": "Jawab kreatif, santai, banyak ide."},
+    "🔥 Karai Creative S": {"api_name": "gemini-2.0-flash", "desc": "Analisis mendalam pakai arsitektur Flash."},
+    "🌟 Karai Creative X": {"api_name": "gemini-2.5-pro", "desc": "Model tertinggi, Pro tingkat lanjut."}
+}
+
+# --- 9. SIDEBAR ---
 with st.sidebar:
-    # Micro Logo
-    try:
-        logo = Image.open("logo_no_bg.png")
-        st.image(logo) 
-    except FileNotFoundError:
-        st.error("Logo 'logo_no_bg.png' gak ketemu!")
+    try: st.image(Image.open("logo_no_bg.png")) 
+    except: pass
 
-    st.write(f"👤 **User:** {st.session_state.username}")
+    st.write(f"👤 **{st.session_state.user_name}**")
+    st.caption(f"{st.session_state.user_email}")
     
     if st.button("🚪 Logout"):
         st.session_state.logged_in = False
         st.session_state.messages = []
+        st.session_state.db_loaded = False
         st.rerun()
-
     st.divider()
 
-    # SECTION 1: LICENSE GATEKEEPING
-    st.subheader("🔑 Lisensi Sistem")
-    current_key = st.text_input("License Key Premium:", type="password")
-    if st.button("Aktivasi"):
-        if current_key == PREMIUM_LICENSE_KEY:
-            st.session_state.is_premium = True
-            st.success("PREMIUM AKTIF!")
-        else:
-            st.session_state.is_premium = False
-            st.error("Kode salah.")
-
-    # SECTION 2: MODEL SELECTION
+    # Model Selection
     st.subheader("🧠 Model AI")
     available_models = ["⚡ Karai Basic", "🧠 Karai Expert", "🎨 Karai Creative"]
     if st.session_state.is_premium:
         available_models.extend(["🔥 Karai Creative S", "🌟 Karai Creative X"])
-
     mode_karai = st.selectbox("Pilih Model:", available_models)
     current_config = model_configs[mode_karai]
     st.divider()
 
-    # SECTION 3: UPLOAD FOTO & SIMPAN MEMORI
-    st.subheader("📎 Attachment & Memori")
+    # Attachment & Database Info
+    st.subheader("📎 Attachment")
+    uploaded_file = st.file_uploader("Upload Foto:", type=['png', 'jpg', 'jpeg'], key=st.session_state.uploader_key)
     
-    # Fitur Upload Gambar
-    uploaded_file = st.file_uploader("Upload Foto untuk dianalisis:", type=['png', 'jpg', 'jpeg'])
+    st.divider()
+    st.subheader("💾 Status Database")
+    st.success("🟢 Sync: Cloud Realtime DB")
     
-    # Fitur Simpan Chat ke TXT
-    if st.session_state.messages:
-        chat_history_str = "=== KarAI Chat History ===\n\n"
-        for m in st.session_state.messages:
-            chat_history_str += f"{m['role'].upper()}: {m['content']}\n\n"
-            
-        st.download_button(
-            label="💾 Download Riwayat Chat",
-            data=chat_history_str,
-            file_name="KarAI_Memory.txt",
-            mime="text/plain",
-            use_container_width=True
-        )
+    if st.button("🧹 Clear Chat History"):
+        st.session_state.messages = []
+        save_chat_to_firebase(st.session_state.user_email, [])
+        st.rerun()
 
-# --- 8. INITIALIZE AI MODEL ---
-if not api_key_env or api_key_env == "":
-    st.error("❌ ERROR: API Key kosong.")
-    st.stop()
+# --- 10. INITIALIZE AI MODEL ---
+genai.configure(api_key=api_key_env.strip().strip('"').strip("'"))
+model = genai.GenerativeModel(model_name=current_config["api_name"], system_instruction=current_config["desc"])
 
-genai.configure(api_key=api_key_env)
-model = genai.GenerativeModel(
-    model_name=current_config["api_name"],
-    system_instruction=current_config["desc"]
-)
+# --- 11. MAIN CHAT AREA ---
+st.markdown("<h1 class='main-title'>KarAI PROTOTYPE 3.0</h1>", unsafe_allow_html=True)
 
-# --- 9. MAIN CHAT AREA ---
-# Judul Utama & Subtitle yang sudah diperbaiki
-st.markdown("<h1 class='main-title'>KarAI PROTOTYPE 1</h1>", unsafe_allow_html=True)
-st.markdown("<p class='sub-title'>Futuristic Intelligence by Kariem</p>", unsafe_allow_html=True)
-
-# Tampilkan history chat (beserta gambarnya jika ada)
-for message in st.session_state.messages:
+# Tampilkan history chat & Tombol Download Foto
+for i, message in enumerate(st.session_state.messages):
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
         if "image" in message and message["image"] is not None:
             st.image(message["image"], width=200)
+            
+            img_buf = io.BytesIO()
+            message["image"].save(img_buf, format="PNG")
+            st.download_button(
+                label="⬇️ Download Foto Ini",
+                data=img_buf.getvalue(),
+                file_name=f"KarAI_History_{i}.png",
+                mime="image/png",
+                key=f"dl_btn_{i}"
+            )
 
 # Jalur input chat user
 if prompt := st.chat_input("Kirim perintah ke KarAI..."):
-    
-    # Cek apakah user mau mengirim teks beserta gambar
     img_to_send = None
     if uploaded_file is not None:
         img_to_send = Image.open(uploaded_file)
 
-    # Simpan ke history state
     st.session_state.messages.append({"role": "user", "content": prompt, "image": img_to_send})
     
-    # Tampilkan pesan user di layar
     with st.chat_message("user"):
         st.markdown(prompt)
         if img_to_send:
             st.image(img_to_send, width=200)
 
-    # Eksekusi ke Gemini
     with st.chat_message("assistant"):
-        with st.spinner(f'{mode_karai} sedang menganalisis...'):
+        with st.spinner(f'{mode_karai} memproses...'):
             try:
-                # Menyiapkan payload. Jika ada gambar, kirim sebagai list [teks, gambar]
                 payload = [prompt]
-                if img_to_send:
-                    payload.append(img_to_send)
+                if img_to_send: payload.append(img_to_send)
 
                 response = model.generate_content(payload)
                 st.markdown(response.text)
                 
-                # Hitung Token
-                try:
-                    in_t = model.count_tokens(payload).total_tokens
-                    out_t = model.count_tokens(response.text).total_tokens
-                    st.session_state.total_tokens += (in_t + out_t)
-                except:
-                    pass 
-                
-                # Simpan balasan AI ke history
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
+                
+                # SIMPAN KE FIREBASE CLOUD DATABASE
+                save_chat_to_firebase(st.session_state.user_email, st.session_state.messages)
+                
+                # RESET FOTO BIAR HILANG DARI SIDEBAR
+                st.session_state.uploader_key = str(uuid.uuid4())
+                
                 st.rerun()
 
             except Exception as e:
-                st.error(f"Koneksi terputus: {e}")
+                st.error(f"Error: {e}")

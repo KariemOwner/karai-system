@@ -3,46 +3,18 @@ import google.generativeai as genai
 from PIL import Image
 import os, io, uuid, requests
 
-# --- 1. CONFIG ---
+# --- 1. CONFIG & CSS (STABIL & ADAPTIVE) ---
 st.set_page_config(page_title="KarAI Pro", page_icon="K", layout="wide")
 
 st.markdown("""
 <style>
-    /* Default Dark Mode (Aman) */
-    [data-theme="dark"] {
-        --bg-color: #000000;
-        --text-color: #FFFFFF;
-        --sidebar-bg: #0a0a0a;
-    }
-    /* Light Mode (Tampilannya jadi Bersih/Minimalis) */
-    [data-theme="light"] {
-        --bg-color: #FFFFFF;
-        --text-color: #000000;
-        --sidebar-bg: #F0F2F6;
-    }
+    /* Styling Dasar */
+    body { font-family: 'Courier New', monospace; }
+    [data-testid="stSidebar"] { background-color: #0a0a0a; border-right: 1px solid #333333; }
+    .stChatMessage { background-color: transparent !important; padding: 10px !important; }
     
-    .stApp { 
-        background-color: var(--bg-color); 
-        color: var(--text-color); 
-        font-family: 'Courier New', Courier, monospace; 
-    }
-    
-    [data-testid="stSidebar"] { 
-        background-color: var(--sidebar-bg); 
-    }
-    
-    /* Font Color Adaptive */
-    h1, h2, h3, p, span, div { color: var(--text-color) !important; }
-
-    /* Chat Styling */
-    .stChatMessage { background-color: transparent !important; }
-    
-    /* Button Google */
-    .google-btn { 
-        width:100%; padding:12px; background-color:#4285F4; color:white !important; 
-        border:none; border-radius:5px; font-weight:bold; text-align:center; 
-        text-decoration: none; display: inline-block; 
-    }
+    /* Tombol Delete */
+    .delete-btn { background: none; border: none; cursor: pointer; color: #ff4b4b; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -61,7 +33,6 @@ def save_chat(email, msgs, cid):
 
 def get_chat_history(email):
     if not firebase_url or not email: return []
-    # ?shallow=true buat ngambil daftar key aja (biar cepet)
     url = f"{firebase_url}/chats/{email.replace('.', '_')}.json?shallow=true"
     res = requests.get(url)
     return list(res.json().keys()) if res.status_code == 200 and res.json() else []
@@ -76,29 +47,42 @@ if not st.session_state.user_email:
             st.rerun()
     st.stop()
 
-# --- 4. SIDEBAR & HISTORY ---
+# --- 4. SIDEBAR (MODEL + HISTORY + DELETE) ---
 with st.sidebar:
+    try: st.image("logo_no_bg.png", width=60)
+    except: st.write("KarAI")
     st.write(f"👤 **{st.session_state.user_email}**")
     
+    # Tombol Chat Baru
     if st.button("➕ Chat Baru"):
-        save_chat(st.session_state.user_email, st.session_state.messages, st.session_state.chat_id)
         st.session_state.messages = []
         st.session_state.chat_id = str(uuid.uuid4())
         st.rerun()
         
-    st.divider()
-    st.subheader("📜 Chat History")
+    st.divider() # Garis dashboard balik
     
-    # Ambil list chat
+    # Model Selector
+    models = ["⚡ Karai Basic", "🧠 Karai Expert", "🎨 Karai Creative"]
+    if "ikram" in st.session_state.user_email.lower(): models.extend(["🔥 Karai Creative S", "🌟 Karai Creative X"])
+    mode = st.selectbox("Model:", models)
+    
+    st.divider()
+    st.subheader("📜 History")
+    
+    # Daftar History dengan Tombol Hapus
     history = get_chat_history(st.session_state.user_email)
     for cid in history:
-        if st.button(f"Chat: {cid[:8]}..."): # Nampilin 8 digit pertama id
-            # Load chat lama
-            url = f"{firebase_url}/chats/{st.session_state.user_email.replace('.', '_')}/{cid}.json"
-            res = requests.get(url)
-            if res.status_code == 200:
-                st.session_state.messages = res.json()
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            if st.button(f"Chat: {cid[:6]}...", key=f"btn_{cid}"):
+                url = f"{firebase_url}/chats/{st.session_state.user_email.replace('.', '_')}/{cid}.json"
+                st.session_state.messages = requests.get(url).json() or []
                 st.session_state.chat_id = cid
+                st.rerun()
+        with col2:
+            if st.button("🗑️", key=f"del_{cid}"):
+                requests.delete(f"{firebase_url}/chats/{st.session_state.user_email.replace('.', '_')}/{cid}.json")
+                if st.session_state.chat_id == cid: st.session_state.messages = []
                 st.rerun()
 
     st.divider()

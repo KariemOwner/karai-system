@@ -4,14 +4,21 @@ from PIL import Image
 import os, io, uuid, requests
 
 # --- 1. CONFIG ---
-st.set_config(page_title="KarAI Pro", page_icon="K", layout="wide") # Ganti ke set_page_config
+st.set_page_config(page_title="KarAI Pro", page_icon="K", layout="wide")
 
 # --- 2. CSS STABIL (TIDAK LAGI MEMAKSA WARNA) ---
+# Kita cuma ngebunuh border/background boxy, biar clean kayak ChatGPT
 st.markdown("""
 <style>
-    [data-testid="stSidebar"] { border-right: 1px solid #333333; }
-    .stChatMessage { background-color: transparent !important; }
+    /* Hilangin kotak background chat */
+    .stChatMessage { background-color: transparent !important; padding: 5px !important; }
+    .stChatMessage > div { border: none !important; }
+    
+    /* Biarin Streamlit yang nentuin warna font */
     .stMarkdown { color: inherit !important; }
+    
+    /* Sidebar biar tetep elegan tapi gak maksain warna */
+    [data-testid="stSidebar"] { border-right: 1px solid rgba(128,128,128,0.2); }
 </style>
 """, unsafe_allow_html=True)
 
@@ -44,13 +51,10 @@ if not st.session_state.user_email:
             st.rerun()
     st.stop()
 
-# --- 5. SIDEBAR (LOGO FIX) ---
+# --- 5. SIDEBAR (STABLE) ---
 with st.sidebar:
-    # Cek apakah file ada, kalau nggak ada, kasih info biar lu tau filenya missing
-    try: 
-        st.image("logo_no_bg.png", width=60)
-    except Exception:
-        st.error("Logo 'logo_no_bg.png' tidak ditemukan di root folder!")
+    try: st.image("logo_no_bg.png", width=60)
+    except: st.write("KarAI")
     
     st.write(f"👤 **{st.session_state.user_email}**")
     
@@ -87,7 +91,7 @@ with st.sidebar:
     st.divider()
     if st.button("Logout"): st.session_state.user_email = ""; st.session_state.messages = []; st.rerun()
 
-# --- 6. CHAT ENGINE ---
+# --- 6. CHAT ENGINE (FIXED) ---
 st.title("KarAI")
 genai.configure(api_key=st.secrets.get("GOOGLE_API_KEY"))
 model = genai.GenerativeModel("gemini-2.5-flash-lite")
@@ -102,7 +106,7 @@ if prompt := st.chat_input("Tanya KarAI..."):
         st.markdown(prompt)
         if img: st.image(img, width=200)
     
-    with st.spinner("⏳ KarAI sedang berpikir..."):
+    with st.spinner("KarAI sedang berpikir..."):
         try:
             payload = [prompt, img] if img else [prompt]
             res = model.generate_content(payload)

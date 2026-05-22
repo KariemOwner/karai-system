@@ -26,14 +26,22 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- 3. SESSION STATE ---
-if "logged_in" not in st.session_state: st.session_state.logged_in = False
-if "user_email" not in st.session_state: st.session_state.user_email = ""
-if "user_name" not in st.session_state: st.session_state.user_name = ""
-if "is_premium" not in st.session_state: st.session_state.is_premium = False
-if "messages" not in st.session_state: st.session_state.messages = []
-if "total_tokens" not in st.session_state: st.session_state.total_tokens = 0
-if "uploader_key" not in st.session_state: st.session_state.uploader_key = str(uuid.uuid4())
-if "db_loaded" not in st.session_state: st.session_state.db_loaded = False
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "user_email" not in st.session_state:
+    st.session_state.user_email = ""
+if "user_name" not in st.session_state:
+    st.session_state.user_name = ""
+if "is_premium" not in st.session_state:
+    st.session_state.is_premium = False
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "total_tokens" not in st.session_state:
+    st.session_state.total_tokens = 0
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = str(uuid.uuid4())
+if "db_loaded" not in st.session_state:
+    st.session_state.db_loaded = False
 
 # --- 4. SECRETS & CLOUD KEYS ---
 api_key_env = st.secrets.get("GOOGLE_API_KEY", "")
@@ -46,31 +54,32 @@ PREMIUM_LICENSE_KEY = "KARAI-PRO-1337"
 
 # --- 5. FIREBASE DATABASE LOGIC ---
 def save_chat_to_firebase(email, messages):
-    if not firebase_url: return
+    if not firebase_url:
+        return
     safe_email = email.replace(".", "_").replace("@", "_")
     url = f"{firebase_url}/chats/{safe_email}.json"
-    # Filter gambar biar gak menuh-menuhin database, kita simpan teksnya aja
     clean_messages = [{"role": m["role"], "content": m["content"]} for m in messages]
-    try: requests.put(url, json=clean_messages)
-    except: pass
+    try:
+        requests.put(url, json=clean_messages)
+    except Exception:
+        pass
 
 def load_chat_from_firebase(email):
-    if not firebase_url: return []
+    if not firebase_url:
+        return []
     safe_email = email.replace(".", "_").replace("@", "_")
     url = f"{firebase_url}/chats/{safe_email}.json"
     try:
         res = requests.get(url)
         if res.status_code == 200 and res.json():
             return res.json()
-    except: pass
+    except Exception:
+        pass
     return []
 
 # --- 6. GOOGLE OAUTH LOGIN LOGIC ---
-# Cek apakah Google ngebanting user balik bawa kode rahasia
 if "code" in st.query_params and not st.session_state.logged_in:
     code = st.query_params["code"]
-    
-    # Tuker kode dengan Token Akses Google
     token_url = "https://oauth2.googleapis.com/token"
     data = {
         "code": code,
@@ -83,7 +92,6 @@ if "code" in st.query_params and not st.session_state.logged_in:
     access_token = res.json().get("access_token")
     
     if access_token:
-        # Ambil data profil (Nama & Email)
         user_info_url = "https://www.googleapis.com/oauth2/v1/userinfo"
         headers = {"Authorization": f"Bearer {access_token}"}
         user_res = requests.get(user_info_url, headers=headers).json()
@@ -92,10 +100,11 @@ if "code" in st.query_params and not st.session_state.logged_in:
         st.session_state.user_email = user_res.get("email", "")
         st.session_state.user_name = user_res.get("name", "User")
         
-        # Berikan status Premium otomatis untuk email lu
-        st.session_state.is_premium = True if "ikram" in st.session_state.user_email.lower() else False
+        if "ikram" in st.session_state.user_email.lower():
+            st.session_state.is_premium = True
+        else:
+            st.session_state.is_premium = False
         
-        # Bersihkan URL biar kodenya gak kepakai dua kali
         st.query_params.clear()
         st.rerun()
 
@@ -108,14 +117,15 @@ if not st.session_state.logged_in:
     with col2:
         if client_id and client_secret:
             st.success("🔒 Sistem Diamankan oleh Google OAuth 2.0")
-            # Bikin link Login Google asli
-            auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?client_id={client_id}&redirect_uri={redirect_uri}&response_type=code&scope=openid%20email%20profile"
+            # Perbaikan Utama: Menggunakan urllib.parse.quote untuk mengamankan karakter khusus URL
+            encoded_redirect = urllib.parse.quote(redirect_uri, safe='')
+            auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?client_id={client_id}&redirect_uri={encoded_redirect}&response_type=code&scope=openid%20email%20profile"
             st.markdown(f'<a href="{auth_url}" target="_self" class="google-btn">🌐 Sign in with Google</a>', unsafe_allow_html=True)
         else:
             st.error("Google Auth Credentials belum terpasang di Secrets.")
     st.stop()
 
-# --- 7. LOAD HISTORY DARI CLOUD DB (HANYA SEKALI PAS LOGIN) ---
+# --- 7. LOAD HISTORY DARI CLOUD DB ---
 if st.session_state.logged_in and not st.session_state.db_loaded:
     cloud_history = load_chat_from_firebase(st.session_state.user_email)
     if cloud_history:
@@ -133,8 +143,10 @@ model_configs = {
 
 # --- 9. SIDEBAR ---
 with st.sidebar:
-    try: st.image(Image.open("logo_no_bg.png")) 
-    except: pass
+    try:
+        st.image(Image.open("logo_no_bg.png")) 
+    except Exception:
+        pass
 
     st.write(f"👤 **{st.session_state.user_name}**")
     st.caption(f"{st.session_state.user_email}")
@@ -146,7 +158,6 @@ with st.sidebar:
         st.rerun()
     st.divider()
 
-    # Model Selection
     st.subheader("🧠 Model AI")
     available_models = ["⚡ Karai Basic", "🧠 Karai Expert", "🎨 Karai Creative"]
     if st.session_state.is_premium:
@@ -155,7 +166,6 @@ with st.sidebar:
     current_config = model_configs[mode_karai]
     st.divider()
 
-    # Attachment & Database Info
     st.subheader("📎 Attachment")
     uploaded_file = st.file_uploader("Upload Foto:", type=['png', 'jpg', 'jpeg'], key=st.session_state.uploader_key)
     
@@ -169,13 +179,13 @@ with st.sidebar:
         st.rerun()
 
 # --- 10. INITIALIZE AI MODEL ---
-genai.configure(api_key=api_key_env.strip().strip('"').strip("'"))
+api_key_clean = api_key_env.strip().strip('"').strip("'")
+genai.configure(api_key=api_key_clean)
 model = genai.GenerativeModel(model_name=current_config["api_name"], system_instruction=current_config["desc"])
 
 # --- 11. MAIN CHAT AREA ---
 st.markdown("<h1 class='main-title'>KarAI PROTOTYPE 3.0</h1>", unsafe_allow_html=True)
 
-# Tampilkan history chat & Tombol Download Foto
 for i, message in enumerate(st.session_state.messages):
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
@@ -192,7 +202,6 @@ for i, message in enumerate(st.session_state.messages):
                 key=f"dl_btn_{i}"
             )
 
-# Jalur input chat user
 if prompt := st.chat_input("Kirim perintah ke KarAI..."):
     img_to_send = None
     if uploaded_file is not None:
@@ -209,7 +218,8 @@ if prompt := st.chat_input("Kirim perintah ke KarAI..."):
         with st.spinner(f'{mode_karai} memproses...'):
             try:
                 payload = [prompt]
-                if img_to_send: payload.append(img_to_send)
+                if img_to_send:
+                    payload.append(img_to_send)
 
                 response = model.generate_content(payload)
                 st.markdown(response.text)

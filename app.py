@@ -3,24 +3,21 @@ import google.generativeai as genai
 from PIL import Image
 import os, io, uuid, requests
 
-# --- 1. CONFIG & THEME (FIXED) ---
+# --- 1. CONFIG ---
 st.set_page_config(page_title="KarAI Pro", page_icon="K", layout="wide")
 
+# --- 2. CSS STABIL (TIDAK LAGI MEMAKSA WARNA) ---
 st.markdown("""
 <style>
-    :root, [data-theme="light"] {
-        --bg: #FFFFFF; --text: #000000; --side: #F0F2F6;
-    }
-    [data-theme="dark"] {
-        --bg: #0E1117; --text: #FAFAFA; --side: #0a0a0a;
-    }
-    .stApp { background-color: var(--bg); color: var(--text); font-family: 'Courier New', monospace; }
-    [data-testid="stSidebar"] { background-color: var(--side); border-right: 1px solid #333333; }
+    /* CSS Minimalis agar tidak bentrok dengan Dark/Light Mode bawaan */
+    [data-testid="stSidebar"] { border-right: 1px solid #333333; }
     .stChatMessage { background-color: transparent !important; }
+    /* Pastikan chat text mengikuti tema */
+    .stMarkdown { color: inherit !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. SESSION & DATABASE ---
+# --- 3. SESSION & DATABASE ---
 if "user_email" not in st.session_state: st.session_state.user_email = ""
 if "messages" not in st.session_state: st.session_state.messages = []
 if "chat_id" not in st.session_state: st.session_state.chat_id = str(uuid.uuid4())
@@ -39,7 +36,7 @@ def get_chat_history(email):
     res = requests.get(url)
     return list(res.json().keys()) if res.status_code == 200 and res.json() else []
 
-# --- 3. LOGIN ---
+# --- 4. LOGIN ---
 if not st.session_state.user_email:
     st.markdown("<h1 style='text-align:center;'>KarAI PROTOTYPE 3.0</h1>", unsafe_allow_html=True)
     with st.columns([1,2,1])[1]:
@@ -49,7 +46,7 @@ if not st.session_state.user_email:
             st.rerun()
     st.stop()
 
-# --- 4. SIDEBAR (STABLE) ---
+# --- 5. SIDEBAR ---
 with st.sidebar:
     st.write(f"👤 **{st.session_state.user_email}**")
     
@@ -60,12 +57,10 @@ with st.sidebar:
         
     st.divider()
     
-    # Model Selector
     models = ["⚡ Karai Basic", "🧠 Karai Expert", "🎨 Karai Creative"]
     if "ikram" in st.session_state.user_email.lower(): models.extend(["🔥 Karai Creative S", "🌟 Karai Creative X"])
     mode = st.selectbox("Model:", models)
     
-    # Upload Foto Balik
     uploaded_file = st.file_uploader("Upload Foto:", type=['png', 'jpg', 'jpeg'], key=st.session_state.uploader_key)
     
     st.divider()
@@ -88,7 +83,7 @@ with st.sidebar:
     st.divider()
     if st.button("Logout"): st.session_state.user_email = ""; st.session_state.messages = []; st.rerun()
 
-# --- 5. CHAT ENGINE (FIXED UPLOAD) ---
+# --- 6. CHAT ENGINE ---
 st.title("KarAI")
 genai.configure(api_key=st.secrets.get("GOOGLE_API_KEY"))
 model = genai.GenerativeModel("gemini-2.5-flash-lite")
@@ -105,13 +100,12 @@ if prompt := st.chat_input("Tanya KarAI..."):
     
     with st.spinner("⏳ KarAI sedang berpikir..."):
         try:
-            # Kirim teks + gambar ke AI
             payload = [prompt, img] if img else [prompt]
             res = model.generate_content(payload)
             st.chat_message("assistant").markdown(res.text)
             st.session_state.messages.append({"role": "assistant", "content": res.text})
             save_chat(st.session_state.user_email, st.session_state.messages, st.session_state.chat_id)
-            st.session_state.uploader_key = str(uuid.uuid4()) # Reset uploader
+            st.session_state.uploader_key = str(uuid.uuid4())
             st.rerun()
         except Exception as e:
             st.error(f"Error: {e}")

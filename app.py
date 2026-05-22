@@ -30,7 +30,7 @@ model_configs = {
     }
 }
 
-# --- 3. THEME & CSS KUSTOM (Simple Black & White Futuristic) ---
+# --- 3. THEME & CSS KUSTOM (Futuristic B&W - Small Transparent Logo) ---
 st.markdown("""
 <style>
     /* Main Background & Text Color */
@@ -46,8 +46,30 @@ st.markdown("""
         border-right: 1px solid #333333;
     }
     
+    /* Center and Style the Sidebar Logo */
+    [data-testid="stSidebar"] div.stImage {
+        display: flex;
+        justify-content: center;
+        margin-top: -30px; /* Pull up towards top */
+        margin-bottom: 0px;
+    }
+    [data-testid="stSidebar"] div.stImage img {
+        border-radius: 50%;
+        border: 2px solid #FFFFFF; /* Gahar border */
+        width: 80px !important; /* Small width */
+        height: 80px !important;
+        object-fit: cover;
+    }
+
     /* Mengubah warna teks judul di sidebar */
-    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {
+    [data-testid="stSidebar"] h1 {
+        color: #FFFFFF !important;
+        text-align: center;
+        font-size: 1.5rem !important;
+        margin-top: 10px !important;
+        letter-spacing: 2px;
+    }
+    [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] p {
         color: #FFFFFF !important;
     }
 
@@ -108,17 +130,37 @@ if "total_tokens" not in st.session_state:
 # KODE RAHASIA UNTUK PREMIUM MAPPING
 PREMIUM_LICENSE_KEY = "KARAI-PRO-1337"
 
-# --- 5. SIDEBAR - BRANDING, AUTH & CONFIGURATION ---
-with st.sidebar:
-    # Menampilkan Logo K kepunyaan Kariem
-    try:
-        logo = Image.open("logo.png")
-        st.image(logo, use_column_width=True)
-    except FileNotFoundError:
-        st.error("Logo 'logo.png' belum ada di folder proyek lokal lu!")
+# --- 5. API KEY RETRIEVAL LOGIC (Bypass regular env cache) ---
+# Mencoba membaca dari direct/flat Streamlit Secrets untuk menghindari cache OS
+api_key_env = st.secrets.get("GOOGLE_API_KEY", "")
 
-    st.title("KarAI SYSTEM v1.0")
+if not api_key_env:
+    # Backup check jika format [env] masih dipakai
+    api_key_env = st.secrets.get("env", {}).get("GOOGLE_API_KEY", os.environ.get("GOOGLE_API_KEY", ""))
+
+# Bersihkan karakter hantu
+api_key_env = api_key_env.strip().strip('"').strip("'")
+
+# --- 6. SIDEBAR - BRANDING, AUTH & CONFIGURATION ---
+with st.sidebar:
+    # Menampilkan Logo K kepunyaan Kariem (Versi No BG)
+    try:
+        # Mencoba membuka file logo baru yang sudah dihapus backgroundnya
+        logo = Image.open("logo_no_bg.png")
+        # Menampilkan tanpa use_column_width agar CSS bisa kontrol size
+        st.image(logo) 
+    except FileNotFoundError:
+        st.error("Error: File 'logo_no_bg.png' gak ketemu. Hapus BG logo lu, save PNG, namain 'logo_no_bg.png', taruh di folder yang sama!")
+
+    st.title("KarAI SYSTEM")
     st.write("Futuristic Intelligence by Kariem.")
+    
+    # DEBUGGING TOOL: Menampilkan mask key asli yang sedang dibaca server
+    if api_key_env:
+        masked_key = f"{api_key_env[:7]}...{api_key_env[-5:]}" if len(api_key_env) > 12 else "Terlalu Pendek"
+        st.text(f"📡 Server Key: {masked_key}")
+    else:
+        st.text("📡 Server Key: GAK DETEKSI")
     st.divider()
 
     # SECTION 1: AUTH & LICENSE GATEKEEPING
@@ -130,7 +172,7 @@ with st.sidebar:
     if st.button("Aktivasi Lisensi"):
         if current_key == PREMIUM_LICENSE_KEY:
             st.session_state.is_premium = True
-            st.success("STATUS: PREMIUM AKTIF. Akses S & X terbuka!")
+            st.success("STATUS: PREMIUM AKTIF!")
             st.rerun()
         else:
             st.session_state.is_premium = False
@@ -150,39 +192,33 @@ with st.sidebar:
         available_models.extend(["🔥 Karai Creative S", "🌟 Karai Creative X"])
 
     mode_karai = st.selectbox("Pilih Tingkatan Model:", available_models)
+    
+    # Mengambil konfigurasi model yang dipilih (Aman karena model_configs di atas)
     current_config = model_configs[mode_karai]
     
-    st.write(f"ℹ️ *System Prompt: {current_config['desc']}*")
+    st.write(f"ℹ️ *Prompt: {current_config['desc']}*")
     st.divider()
 
     # SECTION 3: TOKEN USE TRACKER
     st.subheader("💾 Monitor Token Sesi")
     st.metric(label="Total Token Terpakai", value=f"{st.session_state.total_tokens:,}")
 
-# --- 6. INITIALIZE AI MODEL (STRICT CHECKING) ---
-# Mengambil key dari Cloud Secrets
-api_key_env = os.environ.get("GOOGLE_API_KEY")
-
-# Validasi ketat untuk memastikan key beneran dibaca dari Secrets Cloud
-if not api_key_env or api_key_env == "" or "PASTE_API_KEY" in api_key_env:
-    st.error("❌ ERROR SISTEM: Server Streamlit gagal membaca 'GOOGLE_API_KEY' dari menu Secrets lu! Tolong cek kembali tulisan di Advanced Settings > Secrets.")
+# --- 7. INITIALIZE AI MODEL ---
+if not api_key_env or api_key_env == "":
+    st.error("❌ ERROR SISTEM: API Key kosong di server. Tolong isi Secrets Streamlit Cloud lu.")
     st.stop()
 
-# Bersihkan karakter pembungkus (spasi/kutip berlebih) yang gak sengaja ikut ke-paste
-api_key_env = api_key_env.strip().strip('"').strip("'")
-
-# Konfigurasi AI menggunakan key yang bersih
 genai.configure(api_key=api_key_env)
 
-# Bikin objek model AI
+# Bikin objek model AI sesuai pilihan user yang aktif
 model = genai.GenerativeModel(
     model_name=current_config["api_name"],
     system_instruction=current_config["desc"]
 )
 
-# --- 7. MAIN CHAT AREA ---
+# --- 8. MAIN CHAT AREA ---
 st.title("🤖 KarAI SYSTEM")
-st.write(f"Sistem beroperasi pada tingkatan: **{mode_karai}**")
+st.write(f"Tingkatan: **{mode_karai}**")
 
 # Tampilkan history chat
 for message in st.session_state.messages:
@@ -207,10 +243,10 @@ if prompt := st.chat_input("Kirim perintah ke KarAI..."):
                     in_t = model.count_tokens(prompt).total_tokens
                     out_t = model.count_tokens(response.text).total_tokens
                     total_turn = in_t + out_t
-                    st.write(f"📊 *Token transaksi ini: {total_turn:,}*")
+                    st.write(f"📊 *Token turn ini: {total_turn:,}*")
                     st.session_state.total_tokens += total_turn
                 except:
-                    pass
+                    pass # Skip jika kuota counter token sibuk
                 
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
                 st.rerun()

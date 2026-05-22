@@ -6,14 +6,38 @@ import os
 # --- 1. CONFIGURATION HARUS PALING ATAS ---
 st.set_page_config(page_title="KarAI - Futuristic Intelligence", page_icon="K", layout="wide", initial_sidebar_state="expanded")
 
-# --- 2. THEME & CSS KUSTOM (Simple Black & White Futuristic) ---
+# --- 2. CONFIG LOGIC & DICTIONARY MODEL (Ditaruh di atas agar terdefinisi global) ---
+model_configs = {
+    "⚡ Karai Basic": {
+        "api_name": "gemini-2.5-flash-lite",
+        "desc": "Jawab sesingkat dan sepadat mungkin, jangan berikan penjelasan panjang. Mirip seperti cuplikan pencarian web."
+    },
+    "🧠 Karai Expert": {
+        "api_name": "gemini-2.5-pro",
+        "desc": "Jawab dengan sangat mendalam, teknis, dan step-by-step. Gunakan logika tingkat tinggi."
+    },
+    "🎨 Karai Creative": {
+        "api_name": "gemini-3.5-flash",
+        "desc": "Jawab dengan gaya yang kreatif, santai, namun terstruktur. Berikan ide-ide out of the box."
+    },
+    "🔥 Karai Creative S": {
+        "api_name": "gemini-2.0-flash",
+        "desc": "Berpikir cepat namun mendalam menggunakan basis arsitektur Flash ter-update. Output luwes layaknya manusia."
+    },
+    "🌟 Karai Creative X": {
+        "api_name": "gemini-2.5-pro",
+        "desc": "Model tertinggi dengan penalaran Pro tingkat lanjut yang sangat kompleks, analitis, dan detail maksimal."
+    }
+}
+
+# --- 3. THEME & CSS KUSTOM (Simple Black & White Futuristic) ---
 st.markdown("""
 <style>
     /* Main Background & Text Color */
     .stApp {
         background-color: #000000;
         color: #FFFFFF;
-        font-family: 'Courier New', Courier, monospace; /* Futuristic Font */
+        font-family: 'Courier New', Courier, monospace;
     }
     
     /* Sidebar Styling */
@@ -33,18 +57,12 @@ st.markdown("""
         border: 1px solid #333333;
         color: white;
     }
-    .stSelectbox div[data-baseweb="select"] > div:hover {
-        border-color: #666666;
-    }
     
     /* Mempercantik Input Teks (License Key) */
     .stTextInput input {
         background-color: #111111;
         color: white;
         border: 1px solid #333333;
-    }
-    .stTextInput input:focus {
-        border-color: #FFFFFF;
     }
 
     /* Mempercantik Info/Success Box */
@@ -79,28 +97,25 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. SESSION STATE INITIALIZATION ---
+# --- 4. SESSION STATE INITIALIZATION ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "is_premium" not in st.session_state:
     st.session_state.is_premium = False
 if "total_tokens" not in st.session_state:
     st.session_state.total_tokens = 0
-if "license_key_validated" not in st.session_state:
-    st.session_state.license_key_validated = False
 
-# KODE RAHASIA UNTUK PREMIU. Ganti ini sesuai keinginan.
-# Ini cuma gatekeeping sederhana biar cepet jadi.
+# KODE RAHASIA UNTUK PREMIUM MAPPING
 PREMIUM_LICENSE_KEY = "KARAI-PRO-1337"
 
-# --- 4. SIDEBAR - BRANDING, AUTH & TOKEN ---
+# --- 5. SIDEBAR - BRANDING, AUTH & CONFIGURATION ---
 with st.sidebar:
-    # Menampilkan Logo
+    # Menampilkan Logo K kepunyaan Kariem
     try:
         logo = Image.open("logo.png")
         st.image(logo, use_column_width=True)
     except FileNotFoundError:
-        st.error("Error: File 'logo.png' gak ketemu. Simpan gambar K putih di latar hitam di folder yang sama dengan app.py!")
+        st.error("Logo 'logo.png' belum ada di folder proyek lokal lu!")
 
     st.title("KarAI SYSTEM v1.0")
     st.write("Futuristic Intelligence by Kariem.")
@@ -110,132 +125,92 @@ with st.sidebar:
     st.subheader("🔑 Autentikasi Sistem")
     
     # Input License Key
-    current_key = st.text_input("Masukin License Key Premium:", type="password", help="Dapatkan lisensi dari Kariem Official.")
+    current_key = st.text_input("Masukin License Key Premium:", type="password")
     
     if st.button("Aktivasi Lisensi"):
         if current_key == PREMIUM_LICENSE_KEY:
             st.session_state.is_premium = True
-            st.session_state.license_key_validated = True
-            st.success("STATUS: PREMIUM AKTIF. Selamat menikmati Creative S & X!")
+            st.success("STATUS: PREMIUM AKTIF. Akses S & X terbuka!")
+            st.rerun()
         else:
             st.session_state.is_premium = False
-            st.session_state.license_key_validated = False
-            st.error("Lisensi Gagal: Kode lisensi salah.")
+            st.error("Lisensi Gagal: Kode salah.")
 
-    # Tampilkan Status
-    status_label = "💎 Premium" if st.session_state.is_premium else "👤 Basic User"
-    st.info(f"STATUS AKUN MU: **{status_label}**")
+    # Tampilkan Status User
+    status_label = "💎 Premium Active" if st.session_state.is_premium else "👤 Basic User"
+    st.info(f"STATUS: **{status_label}**")
     st.divider()
 
     # SECTION 2: MODEL SELECTION & TIERING
     st.subheader("🧠 Mode Pemikiran AI")
-    
-    # Daftar model dasar untuk Free
-    model_options = [
-        ("⚡ Karai Basic", "Jawab sesingkat dan sepadat mungkin, seperti cuplikan pencarian web."),
-        ("🧠 Karai Expert", "Jawab dengan sangat mendalam, teknis, dan step-by-step. Gunakan logika tingkat tinggi."),
-        ("🎨 Karai Creative", "Jawab dengan gaya yang kreatif, santai, namun terstruktur. Berikan ide-ide out of the box.")
-    ]
-    
-    # Daftar model premium
-    premium_model_options = [
-        ("🔥 Karai Creative S", "Jawab dengan logika Flash yang sangat mendalam dan teknis. Ini adalah mode Flash Pro."),
-        ("🌟 Karai Creative X", "Jawab dengan logika Pro yang super mendalam, multimodal, dan kompleks. Ini adalah mode Pro Ultimate.")
-    ]
 
-    # Gabungkan model jika Premium
-    available_models = [m[0] for m in model_options]
+    # Batasi pilihan model berdasarkan status premium
+    available_models = ["⚡ Karai Basic", "🧠 Karai Expert", "🎨 Karai Creative"]
     if st.session_state.is_premium:
-        available_models.extend([m[0] for m in premium_model_options])
+        available_models.extend(["🔥 Karai Creative S", "🌟 Karai Creative X"])
 
-    # Pilih model
     mode_karai = st.selectbox("Pilih Tingkatan Model:", available_models)
     
-    # Tampilkan Deskripsi Model yang dipilih
-    current_description = ""
-    for name, desc in (model_options + premium_model_options):
-        if name == mode_karai:
-            current_description = desc
-            break
+    # Mengambil konfigurasi model yang dipilih (Aman karena model_configs di atas)
+    current_config = model_configs[mode_karai]
     
-    st.write(f"ℹ️ **Instruksi Aktif:** *{current_description}*")
+    st.write(f"ℹ️ *System Prompt: {current_config['desc']}*")
     st.divider()
 
     # SECTION 3: TOKEN USE TRACKER
-    st.subheader("💾 Monitor Token")
-    st.metric(label="Total Token Sesi Ini", value=f"{st.session_state.total_tokens:,}", help="Jumlah total token (input + output) yang digunakan selama web ini belum di-refresh.")
+    st.subheader("💾 Monitor Token Sesi")
+    st.metric(label="Total Token Terpakai", value=f"{st.session_state.total_tokens:,}")
 
-# --- 5. INITIALIZE AI MODEL ---
-# Ambil API Key dari Secrets (baca panduan di follow-up!)
+# --- 6. INITIALIZE AI MODEL ---
+# Mengambil key aman dari environment cloud
 api_key_env = os.environ.get("GOOGLE_API_KEY")
 
 if not api_key_env:
-    st.error("API KEY GAK KETEMU. Lu harus setting 'GOOGLE_API_KEY' di Secrets Management Streamlit Cloud sebelum nge-deploy!")
-    st.stop()
+    # Menggunakan cadangan string kosong agar tidak crash jika di run lokal sebelum dimasukkan key asli
+    api_key_env = "PASTE_API_KEY_LU_DISINI_JIKA_TESTING_LOKAL"
 
 genai.configure(api_key=api_key_env)
 
-# Petakan model_karai ke nama model API asli
-model_map = {
-    "⚡ Karai Basic": "gemini-2.5-flash-lite",
-    "🧠 Karai Expert": "gemini-2.5-pro",
-    "🎨 Karai Creative": "gemini-3.5-flash",
-    "🔥 Karai Creative S": "gemini-2.0-flash", # Flash Mendalam
-    "🌟 Karai Creative X": "gemini-2.5-pro"    # Pro Mendalam
-}
-
-nama_model_api = model_map.get(mode_karai, "gemini-2.5-flash-lite")
-
-# Inisialisasi Model AI dengan instruksi sistem
+# Bikin objek model AI sesuai pilihan user yang aktif
 model = genai.GenerativeModel(
-    model_name=nama_model_api,
-    system_instruction=current_description
+    model_name=current_config["api_name"],
+    system_instruction=current_config["desc"]
 )
 
-# --- 6. MAIN CHAT AREA ---
+# --- 7. MAIN CHAT AREA ---
 st.title("🤖 KarAI SYSTEM")
-st.write(f"Sedang beroperasi pada mode **{mode_karai}**.")
+st.write(f"Sistem beroperasi pada tingkatan: **{mode_karai}**")
 
-# Tampilkan history chat (jika ada)
+# Tampilkan history chat
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# Input Chat
-if prompt := st.chat_input("Ketik pertanyaan lu untuk KarAI di sini..."):
+# Jalur input chat user
+if prompt := st.chat_input("Kirim perintah ke KarAI..."):
     
-    # Simpan dan tampilkan pesan dari user
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Tampilkan loading saat KarAI mikir, lalu munculin jawabannya
     with st.chat_message("assistant"):
-        with st.spinner(f'{mode_karai} sedang memproses data...'):
+        with st.spinner(f'Processing {mode_karai}...'):
             try:
-                # Ngirim pesan ke AI
                 response = model.generate_content(prompt)
-                
-                # Nampilin jawaban AI
                 st.markdown(response.text)
                 
-                # --- HITUNG TOKEN ---
-                # Menggunakan library asli untuk menghitung token secara akurat
-                input_tokens = model.count_tokens(prompt).total_tokens
-                output_tokens = model.count_tokens(response.text).total_tokens
-                total_turn_tokens = input_tokens + output_tokens
+                # Hitung Token balik menggunakan logika internal API
+                try:
+                    in_t = model.count_tokens(prompt).total_tokens
+                    out_t = model.count_tokens(response.text).total_tokens
+                    total_turn = in_t + out_t
+                    st.write(f"📊 *Token transaksi ini: {total_turn:,}*")
+                    st.session_state.total_tokens += total_turn
+                except:
+                    pass # Skip jika kuota counter token sibuk
                 
-                # Tampilkan info token untuk turn ini
-                st.write(f"📝 *Token used this turn: {total_turn_tokens:,} (Input: {input_tokens:,}, Output: {output_tokens:,})*")
-                
-                # Update total token sesi
-                st.session_state.total_tokens += total_turn_tokens
-                
-                # Simpan jawaban KarAI ke memori
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
-                
-                # Refresh sidebar buat update token total metric
                 st.rerun()
 
             except Exception as e:
-                st.error(f"Error saat menghubungi API: {e}")
+                st.error(f"Koneksi terputus atau API bermasalah: {e}")

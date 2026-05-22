@@ -3,18 +3,20 @@ import google.generativeai as genai
 from PIL import Image
 import os, io, uuid, requests
 
-# --- 1. CONFIG & CSS (STABIL & ADAPTIVE) ---
+# --- 1. CONFIG & THEME (FIXED) ---
 st.set_page_config(page_title="KarAI Pro", page_icon="K", layout="wide")
 
 st.markdown("""
 <style>
-    /* Styling Dasar */
-    body { font-family: 'Courier New', monospace; }
-    [data-testid="stSidebar"] { background-color: #0a0a0a; border-right: 1px solid #333333; }
-    .stChatMessage { background-color: transparent !important; padding: 10px !important; }
-    
-    /* Tombol Delete */
-    .delete-btn { background: none; border: none; cursor: pointer; color: #ff4b4b; }
+    :root, [data-theme="light"] {
+        --bg: #FFFFFF; --text: #000000; --side: #F0F2F6;
+    }
+    [data-theme="dark"] {
+        --bg: #0E1117; --text: #FAFAFA; --side: #0a0a0a;
+    }
+    .stApp { background-color: var(--bg); color: var(--text); font-family: 'Courier New', monospace; }
+    [data-testid="stSidebar"] { background-color: var(--side); border-right: 1px solid #333333; }
+    .stChatMessage { background-color: transparent !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -47,29 +49,27 @@ if not st.session_state.user_email:
             st.rerun()
     st.stop()
 
-# --- 4. SIDEBAR (MODEL + HISTORY + DELETE) ---
+# --- 4. SIDEBAR (STABLE) ---
 with st.sidebar:
-    try: st.image("logo_no_bg.png", width=60)
-    except: st.write("KarAI")
     st.write(f"👤 **{st.session_state.user_email}**")
     
-    # Tombol Chat Baru
     if st.button("➕ Chat Baru"):
         st.session_state.messages = []
         st.session_state.chat_id = str(uuid.uuid4())
         st.rerun()
         
-    st.divider() # Garis dashboard balik
+    st.divider()
     
     # Model Selector
     models = ["⚡ Karai Basic", "🧠 Karai Expert", "🎨 Karai Creative"]
     if "ikram" in st.session_state.user_email.lower(): models.extend(["🔥 Karai Creative S", "🌟 Karai Creative X"])
     mode = st.selectbox("Model:", models)
     
+    # Upload Foto Balik
+    uploaded_file = st.file_uploader("Upload Foto:", type=['png', 'jpg', 'jpeg'], key=st.session_state.uploader_key)
+    
     st.divider()
     st.subheader("📜 History")
-    
-    # Daftar History dengan Tombol Hapus
     history = get_chat_history(st.session_state.user_email)
     for cid in history:
         col1, col2 = st.columns([4, 1])
@@ -88,7 +88,7 @@ with st.sidebar:
     st.divider()
     if st.button("Logout"): st.session_state.user_email = ""; st.session_state.messages = []; st.rerun()
 
-# --- 5. CHAT ---
+# --- 5. CHAT ENGINE (FIXED UPLOAD) ---
 st.title("KarAI")
 genai.configure(api_key=st.secrets.get("GOOGLE_API_KEY"))
 model = genai.GenerativeModel("gemini-2.5-flash-lite")
@@ -97,15 +97,21 @@ for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
 if prompt := st.chat_input("Tanya KarAI..."):
+    img = Image.open(uploaded_file) if uploaded_file else None
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"): st.markdown(prompt)
+    with st.chat_message("user"): 
+        st.markdown(prompt)
+        if img: st.image(img, width=200)
     
     with st.spinner("⏳ KarAI sedang berpikir..."):
         try:
-            res = model.generate_content(prompt)
+            # Kirim teks + gambar ke AI
+            payload = [prompt, img] if img else [prompt]
+            res = model.generate_content(payload)
             st.chat_message("assistant").markdown(res.text)
             st.session_state.messages.append({"role": "assistant", "content": res.text})
             save_chat(st.session_state.user_email, st.session_state.messages, st.session_state.chat_id)
+            st.session_state.uploader_key = str(uuid.uuid4()) # Reset uploader
             st.rerun()
         except Exception as e:
             st.error(f"Error: {e}")

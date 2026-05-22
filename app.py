@@ -6,7 +6,7 @@ import os
 # --- 1. CONFIGURATION HARUS PALING ATAS ---
 st.set_page_config(page_title="KarAI - Futuristic Intelligence", page_icon="K", layout="wide", initial_sidebar_state="expanded")
 
-# --- 2. CONFIG LOGIC & DICTIONARY MODEL (Ditaruh di atas agar terdefinisi global) ---
+# --- 2. CONFIG LOGIC & DICTIONARY MODEL ---
 model_configs = {
     "⚡ Karai Basic": {
         "api_name": "gemini-2.5-flash-lite",
@@ -150,8 +150,6 @@ with st.sidebar:
         available_models.extend(["🔥 Karai Creative S", "🌟 Karai Creative X"])
 
     mode_karai = st.selectbox("Pilih Tingkatan Model:", available_models)
-    
-    # Mengambil konfigurasi model yang dipilih (Aman karena model_configs di atas)
     current_config = model_configs[mode_karai]
     
     st.write(f"ℹ️ *System Prompt: {current_config['desc']}*")
@@ -161,17 +159,22 @@ with st.sidebar:
     st.subheader("💾 Monitor Token Sesi")
     st.metric(label="Total Token Terpakai", value=f"{st.session_state.total_tokens:,}")
 
-# --- 6. INITIALIZE AI MODEL ---
-# Mengambil key aman dari environment cloud
+# --- 6. INITIALIZE AI MODEL (STRICT CHECKING) ---
+# Mengambil key dari Cloud Secrets
 api_key_env = os.environ.get("GOOGLE_API_KEY")
 
-if not api_key_env:
-    # Menggunakan cadangan string kosong agar tidak crash jika di run lokal sebelum dimasukkan key asli
-    api_key_env = "PASTE_API_KEY_LU_DISINI_JIKA_TESTING_LOKAL"
+# Validasi ketat untuk memastikan key beneran dibaca dari Secrets Cloud
+if not api_key_env or api_key_env == "" or "PASTE_API_KEY" in api_key_env:
+    st.error("❌ ERROR SISTEM: Server Streamlit gagal membaca 'GOOGLE_API_KEY' dari menu Secrets lu! Tolong cek kembali tulisan di Advanced Settings > Secrets.")
+    st.stop()
 
+# Bersihkan karakter pembungkus (spasi/kutip berlebih) yang gak sengaja ikut ke-paste
+api_key_env = api_key_env.strip().strip('"').strip("'")
+
+# Konfigurasi AI menggunakan key yang bersih
 genai.configure(api_key=api_key_env)
 
-# Bikin objek model AI sesuai pilihan user yang aktif
+# Bikin objek model AI
 model = genai.GenerativeModel(
     model_name=current_config["api_name"],
     system_instruction=current_config["desc"]
@@ -207,7 +210,7 @@ if prompt := st.chat_input("Kirim perintah ke KarAI..."):
                     st.write(f"📊 *Token transaksi ini: {total_turn:,}*")
                     st.session_state.total_tokens += total_turn
                 except:
-                    pass # Skip jika kuota counter token sibuk
+                    pass
                 
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
                 st.rerun()

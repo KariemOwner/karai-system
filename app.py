@@ -4,15 +4,13 @@ from PIL import Image
 import os, io, uuid, requests
 
 # --- 1. CONFIG ---
-st.set_page_config(page_title="KarAI Pro", page_icon="K", layout="wide")
+st.set_config(page_title="KarAI Pro", page_icon="K", layout="wide") # Ganti ke set_page_config
 
 # --- 2. CSS STABIL (TIDAK LAGI MEMAKSA WARNA) ---
 st.markdown("""
 <style>
-    /* CSS Minimalis agar tidak bentrok dengan Dark/Light Mode bawaan */
     [data-testid="stSidebar"] { border-right: 1px solid #333333; }
     .stChatMessage { background-color: transparent !important; }
-    /* Pastikan chat text mengikuti tema */
     .stMarkdown { color: inherit !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -46,8 +44,14 @@ if not st.session_state.user_email:
             st.rerun()
     st.stop()
 
-# --- 5. SIDEBAR ---
+# --- 5. SIDEBAR (LOGO FIX) ---
 with st.sidebar:
+    # Cek apakah file ada, kalau nggak ada, kasih info biar lu tau filenya missing
+    try: 
+        st.image("logo_no_bg.png", width=60)
+    except Exception:
+        st.error("Logo 'logo_no_bg.png' tidak ditemukan di root folder!")
+    
     st.write(f"👤 **{st.session_state.user_email}**")
     
     if st.button("➕ Chat Baru"):

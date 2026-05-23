@@ -1,28 +1,52 @@
 import streamlit as st
 import google.generativeai as genai
 from PIL import Image
-import os, io, uuid, requests
+import uuid, requests, time
+from google.api_core import exceptions
 
-# --- 1. CONFIG ---
-st.set_page_config(page_title="KarAI Pro", page_icon="K", layout="wide")
+# --- 1. CONFIG & FUTURISTIC CSS (SAFE THEME) ---
+st.set_page_config(page_title="KarAI OS", page_icon="🌐", layout="wide")
 
-# --- 2. CSS STABIL (TIDAK LAGI MEMAKSA WARNA) ---
-# Kita cuma ngebunuh border/background boxy, biar clean kayak ChatGPT
 st.markdown("""
 <style>
-    /* Hilangin kotak background chat */
-    .stChatMessage { background-color: transparent !important; padding: 5px !important; }
+    /* Font Cyberpunk / Terminal */
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+    
+    html, body, [class*="st-"] {
+        font-family: 'Share Tech Mono', monospace;
+    }
+    
+    /* Efek Chat Bubble: Hilangkan kotak, ganti dengan garis aksen di kiri */
+    .stChatMessage { 
+        background-color: transparent !important; 
+        border-left: 3px solid var(--primary-color) !important; 
+        padding-left: 15px !important; 
+        margin-bottom: 20px !important;
+    }
     .stChatMessage > div { border: none !important; }
     
-    /* Biarin Streamlit yang nentuin warna font */
+    /* Biarkan warna teks diurus otomatis oleh Streamlit */
     .stMarkdown { color: inherit !important; }
     
-    /* Sidebar biar tetep elegan tapi gak maksain warna */
-    [data-testid="stSidebar"] { border-right: 1px solid rgba(128,128,128,0.2); }
+    /* Sidebar dengan gaya garis putus-putus */
+    [data-testid="stSidebar"] { 
+        border-right: 1px dashed rgba(128, 128, 128, 0.4); 
+    }
+    
+    /* Header Kustom */
+    .cyber-header {
+        text-align: center;
+        letter-spacing: 4px;
+        text-transform: uppercase;
+        border-bottom: 1px solid var(--primary-color);
+        padding-bottom: 10px;
+        margin-bottom: 30px;
+        font-weight: bold;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. SESSION & DATABASE ---
+# --- 2. SESSION & DATABASE ---
 if "user_email" not in st.session_state: st.session_state.user_email = ""
 if "messages" not in st.session_state: st.session_state.messages = []
 if "chat_id" not in st.session_state: st.session_state.chat_id = str(uuid.uuid4())
@@ -41,24 +65,24 @@ def get_chat_history(email):
     res = requests.get(url)
     return list(res.json().keys()) if res.status_code == 200 and res.json() else []
 
-# --- 4. LOGIN ---
+# --- 3. LOGIN TERMINAL ---
 if not st.session_state.user_email:
-    st.markdown("<h1 style='text-align:center;'>KarAI PROTOTYPE 3.0</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 class='cyber-header'>SYS.LOGIN // KarAI OS</h1>", unsafe_allow_html=True)
     with st.columns([1,2,1])[1]:
-        email = st.text_input("Enter ID:")
-        if st.button("Masuk"):
+        email = st.text_input("ENTER ACCESS ID:")
+        if st.button("INITIALIZE CONNECTION"):
             st.session_state.user_email = email
             st.rerun()
     st.stop()
 
-# --- 5. SIDEBAR (STABLE) ---
+# --- 4. SIDEBAR (CONTROL PANEL) ---
 with st.sidebar:
-    try: st.image("logo_no_bg.png", width=60)
-    except: st.write("KarAI")
+    try: st.image("logo_no_bg.png", width=70)
+    except: st.markdown("<h2 style='text-align:center;'>KarAI</h2>", unsafe_allow_html=True)
     
-    st.write(f"👤 **{st.session_state.user_email}**")
+    st.write(f"📡 **USER:** `{st.session_state.user_email}`")
     
-    if st.button("➕ Chat Baru"):
+    if st.button("➕ NEW THREAD"):
         st.session_state.messages = []
         st.session_state.chat_id = str(uuid.uuid4())
         st.rerun()
@@ -67,17 +91,17 @@ with st.sidebar:
     
     models = ["⚡ Karai Basic", "🧠 Karai Expert", "🎨 Karai Creative"]
     if "ikram" in st.session_state.user_email.lower(): models.extend(["🔥 Karai Creative S", "🌟 Karai Creative X"])
-    mode = st.selectbox("Model:", models)
+    mode = st.selectbox("LLM ENGINE:", models)
     
-    uploaded_file = st.file_uploader("Upload Foto:", type=['png', 'jpg', 'jpeg'], key=st.session_state.uploader_key)
+    uploaded_file = st.file_uploader("UPLOAD VISION DATA:", type=['png', 'jpg', 'jpeg'], key=st.session_state.uploader_key)
     
     st.divider()
-    st.subheader("📜 History")
+    st.subheader("📁 DATA LOGS")
     history = get_chat_history(st.session_state.user_email)
     for cid in history:
         col1, col2 = st.columns([4, 1])
         with col1:
-            if st.button(f"Chat: {cid[:6]}...", key=f"btn_{cid}"):
+            if st.button(f"LOG: {cid[:6]}...", key=f"btn_{cid}"):
                 url = f"{firebase_url}/chats/{st.session_state.user_email.replace('.', '_')}/{cid}.json"
                 st.session_state.messages = requests.get(url).json() or []
                 st.session_state.chat_id = cid
@@ -89,31 +113,46 @@ with st.sidebar:
                 st.rerun()
 
     st.divider()
-    if st.button("Logout"): st.session_state.user_email = ""; st.session_state.messages = []; st.rerun()
+    if st.button("TERMINATE SESSION"): 
+        st.session_state.user_email = ""
+        st.session_state.messages = []
+        st.rerun()
 
-# --- 6. CHAT ENGINE (FIXED) ---
-st.title("KarAI")
+# --- 5. MAIN CHAT INTERFACE ---
+st.markdown("<h1 class='cyber-header'>KarAI // SYSTEM ACTIVE</h1>", unsafe_allow_html=True)
 genai.configure(api_key=st.secrets.get("GOOGLE_API_KEY"))
 model = genai.GenerativeModel("gemini-2.5-flash-lite")
 
+# Tampilkan history chat
 for m in st.session_state.messages:
     with st.chat_message(m["role"]): st.markdown(m["content"])
 
-if prompt := st.chat_input("Tanya KarAI..."):
+# Input dan proses
+if prompt := st.chat_input("TRANSMIT MESSAGE..."):
     img = Image.open(uploaded_file) if uploaded_file else None
+    
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): 
         st.markdown(prompt)
         if img: st.image(img, width=200)
     
-    with st.spinner("KarAI sedang berpikir..."):
+    with st.spinner("⏳ PROCESSING DATA..."):
         try:
             payload = [prompt, img] if img else [prompt]
             res = model.generate_content(payload)
+            
             st.chat_message("assistant").markdown(res.text)
             st.session_state.messages.append({"role": "assistant", "content": res.text})
+            
+            # Auto-save ke database
             save_chat(st.session_state.user_email, st.session_state.messages, st.session_state.chat_id)
             st.session_state.uploader_key = str(uuid.uuid4())
             st.rerun()
+            
+        except exceptions.ResourceExhausted:
+            st.error("⚠️ [SYS.ERROR] API Rate Limit Exceeded. Auto-retrying in 10 seconds...")
+            time.sleep(10)
+            st.rerun()
+            
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"FATAL ERROR: {e}")

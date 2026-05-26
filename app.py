@@ -9,17 +9,12 @@ st.set_page_config(page_title="KarAI", page_icon="K", layout="centered")
 
 st.markdown("""
 <style>
-    /* Desain Chat: User di Kanan, AI di Kiri */
     .stChatMessage { padding: 10px; border-radius: 10px; margin-bottom: 15px; }
-    
-    /* Modifikasi Chat Bubble User */
     [data-testid="stChatMessageUser"] { 
         background-color: rgba(33, 150, 243, 0.1); 
         flex-direction: row-reverse; 
     }
     [data-testid="stChatMessageUser"] > div { text-align: right; }
-    
-    /* Sembunyikan icon avatar default biar lebih bersih */
     [data-testid="stChatMessageAvatar"] { display: none; }
 </style>
 """, unsafe_allow_html=True)
@@ -68,14 +63,12 @@ if "user" not in st.session_state:
                 
             data = get_user_data(email)
             if data:
-                # User sudah ada, cek password
                 if data.get('pw') == pw:
                     st.session_state.user = {"email": email, "name": data.get('name', email.split('@')[0])}
                     st.rerun()
                 else: 
                     st.error("Password salah! Silakan gunakan menu Lupa Password jika lupa.")
             else:
-                # Akun baru, simpan ke database
                 name_default = email.split('@')[0]
                 save_user(email, pw, name_default)
                 st.session_state.user = {"email": email, "name": name_default}
@@ -109,26 +102,24 @@ with st.sidebar:
     st.markdown(f"### 👤 Halo, {st.session_state.user['name']}")
     st.divider()
     
-    # Navigasi Menu
     if st.button("💬 Buka Chat", use_container_width=True): st.session_state.page = "chat"; st.rerun()
     if st.button("⚙️ Pengaturan Akun", use_container_width=True): st.session_state.page = "settings"; st.rerun()
     
     st.divider()
     
-    # Fitur-fitur ini hanya muncul kalau user lagi di halaman Chat
     if st.session_state.page == "chat":
         if st.button("➕ Chat Baru", use_container_width=True):
             st.session_state.messages = []
             st.session_state.chat_id = str(uuid.uuid4())
             st.rerun()
         
-        # Pilihan Model & Premium Logics
-        models = ["⚡ Karai Basic", "🧠 Karai Expert", "🎨 Karai Creative"]
+        # Pilihan Model AI (Ditambah Groq Unlimited)
+        models = ["⚡ Karai Basic (Gemini)", "🧠 Karai Expert (Gemini)"]
         if "ikram" in st.session_state.user['email'].lower() or "admin" in st.session_state.user['email'].lower(): 
-            models.extend(["🔥 Karai Premium S", "🌟 Karai Premium X"])
+            models.extend(["🚀 Karai Unlimited (Groq Llama 3)"])
         
         st.session_state.selected_model = st.selectbox("Pilih Model:", models)
-        uploaded_file = st.file_uploader("Upload Foto:", type=['png', 'jpg', 'jpeg'], key=st.session_state.uploader_key)
+        uploaded_file = st.file_uploader("Upload Foto (Khusus Gemini):", type=['png', 'jpg', 'jpeg'], key=st.session_state.uploader_key)
         
         st.divider()
         st.subheader("📜 Riwayat Chat")
@@ -150,13 +141,11 @@ with st.sidebar:
 
     st.divider()
     if st.button("🚪 Logout", use_container_width=True): 
-        # Hapus semua sesi saat logout
         for key in list(st.session_state.keys()): del st.session_state[key]
         st.rerun()
 
 # --- 6. PAGES ROUTING ---
 if st.session_state.page == "settings":
-    # Halaman Pengaturan
     st.title("⚙️ Pengaturan Akun")
     st.write(f"**Email Terdaftar:** `{st.session_state.user['email']}`")
     
@@ -164,51 +153,78 @@ if st.session_state.page == "settings":
     
     if st.button("💾 Simpan Perubahan"):
         curr_data = get_user_data(st.session_state.user['email'])
-        pw_to_save = curr_data['pw'] if curr_data else "1234" # Fallback aman
+        pw_to_save = curr_data['pw'] if curr_data else "1234"
         save_user(st.session_state.user['email'], pw_to_save, new_name)
         st.session_state.user['name'] = new_name
         st.success("Nama berhasil diupdate! Silakan kembali ke menu 'Buka Chat' di sidebar.")
 
 elif st.session_state.page == "chat":
-    # Halaman Chat Utama
     st.title("KarAI")
     
-    # Konfigurasi API Gemini
-    genai.configure(api_key=st.secrets.get("GOOGLE_API_KEY", ""))
-    
-    # Ambil model berdasarkan pilihan di sidebar
-    model_name = "gemini-1.5-flash" # Default
-    if "Basic" in st.session_state.get("selected_model", ""): model_name = "gemini-1.5-flash"
-    elif "Expert" in st.session_state.get("selected_model", ""): model_name = "gemini-1.5-pro"
-    
-    model = genai.GenerativeModel(model_name)
-
-    # Tampilkan history chat di layar
+    # Render History Chat
     for m in st.session_state.messages:
         with st.chat_message(m["role"]): st.markdown(m["content"])
 
     # Input User
     if prompt := st.chat_input("Kirim pesan ke KarAI..."):
         img = Image.open(uploaded_file) if 'uploaded_file' in locals() and uploaded_file else None
+        selected_model = st.session_state.get("selected_model", "")
         
+        # Validasi Gambar vs Model
+        if img and "Unlimited" in selected_model:
+            st.error("⚠️ Model 'Unlimited (Groq)' hanya untuk Teks. Jika ingin kirim gambar, ubah model ke KarAI Basic/Expert di sidebar.")
+            st.stop()
+
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"): 
             st.markdown(prompt)
             if img: st.image(img, width=200)
         
-        # Proses AI
         with st.spinner("⏳ KarAI sedang berpikir..."):
             try:
-                payload = [prompt, img] if img else [prompt]
-                response = model.generate_content(payload)
+                ai_response = ""
                 
-                with st.chat_message("assistant"): st.markdown(response.text)
-                st.session_state.messages.append({"role": "assistant", "content": response.text})
+                # --- MESIN 1: GROQ API (UNLIMITED) ---
+                if "Unlimited" in selected_model:
+                    groq_key = st.secrets.get("GROQ_API_KEY", "")
+                    if not groq_key:
+                        st.error("⚠️ API Key Groq belum dipasang di rahasia Streamlit Cloud Anda!")
+                        st.stop()
+                        
+                    headers = {
+                        "Authorization": f"Bearer {groq_key}",
+                        "Content-Type": "application/json"
+                    }
+                    payload = {
+                        "model": "llama-3.3-70b-versatile",
+                        "messages": [{"role": "user", "content": prompt}]
+                    }
+                    res = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
+                    
+                    if res.status_code == 200:
+                        ai_response = res.json()["choices"][0]["message"]["content"]
+                    else:
+                        st.error(f"Groq API Error: {res.text}")
+                        st.stop()
+
+                # --- MESIN 2: GEMINI API (BASIC/EXPERT) ---
+                else:
+                    genai.configure(api_key=st.secrets.get("GOOGLE_API_KEY", ""))
+                    # FIX 404 ERROR: Menggunakan string model terbaru yang valid
+                    gemini_model = "gemini-1.5-flash-latest" if "Basic" in selected_model else "gemini-1.5-pro-latest"
+                    model = genai.GenerativeModel(gemini_model)
+                    
+                    payload = [prompt, img] if img else [prompt]
+                    response = model.generate_content(payload)
+                    ai_response = response.text
                 
-                # Auto-save setelah AI membalas
+                # Cetak dan Simpan Balasan
+                with st.chat_message("assistant"): st.markdown(ai_response)
+                st.session_state.messages.append({"role": "assistant", "content": ai_response})
+                
                 save_chat(st.session_state.user['email'], st.session_state.messages, st.session_state.chat_id)
-                st.session_state.uploader_key = str(uuid.uuid4()) # Reset uploader gambar
+                st.session_state.uploader_key = str(uuid.uuid4())
                 st.rerun()
                 
             except Exception as e:
-                st.error(f"⚠️ Terjadi kesalahan API (Rate Limit / Gangguan Koneksi). Detail: {e}")
+                st.error(f"⚠️ Terjadi kesalahan API. Detail: {e}")

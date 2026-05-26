@@ -55,7 +55,7 @@ def get_chat_history(email):
     res = requests.get(url)
     return list(res.json().keys()) if res.status_code == 200 and res.json() else []
 
-# --- 3. UI: LOGIN & RESET PASSWORD (UBAH TEKS PORTAL) ---
+# --- 3. UI: LOGIN & RESET PASSWORD ---
 if "user" not in st.session_state:
     st.markdown("<h1 style='text-align: center;'>Login to KarAI</h1>", unsafe_allow_html=True)
     tab1, tab2 = st.tabs(["🔒 Login / Daftar", "🔑 Lupa Password"])
@@ -90,7 +90,6 @@ if "user" not in st.session_state:
                 st.session_state.user = {"email": email, "name": name_default, "premium": False}
                 st.rerun()
 
-    # FIX TYPO SYNTAX ERROR DI SINI
     with tab2:
         st.warning("Gunakan fitur ini jika Anda sudah memiliki akun.")
         email_reset = st.text_input("Email untuk Reset:", placeholder="contoh@gmail.com")
@@ -262,7 +261,7 @@ elif st.session_state.page == "chat":
             try:
                 ai_response = ""
                 
-                # --- MESIN 1: PREMIUM VISION (MENGGUNAKAN GROQ VISION AGAR TIDAK ADA ERROR GEMINI) ---
+                # --- MESIN 1: PREMIUM VISION (MENGGUNAKAN GROQ VISION STABIL) ---
                 if "Premium Vision" in selected_model:
                     if not groq_key:
                         st.error("⚠️ API Key Groq belum dipasang di Secrets!")
@@ -276,7 +275,7 @@ elif st.session_state.page == "chat":
                         image_url = f"data:image/jpeg;base64,{base64_image}"
                         
                         payload = {
-                            "model": "llama-3.2-11b-vision-preview",
+                            "model": "llama-3.2-90b-vision-instruct", # MODEL SUDAH DIUPDATE KE VERSI STABIL
                             "messages": [
                                 {
                                     "role": "user",

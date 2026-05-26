@@ -1,58 +1,41 @@
 import streamlit as st
 import google.generativeai as genai
 from PIL import Image
-import uuid, requests, time
-from google.api_core import exceptions
+import requests
+import uuid
 
-# --- 1. CONFIG & FUTURISTIC CSS (SAFE THEME) ---
-st.set_page_config(page_title="KarAI OS", page_icon="🌐", layout="wide")
+# --- 1. SETUP & CSS (TEMA AMAN & CHAT KANAN-KIRI) ---
+st.set_page_config(page_title="KarAI", page_icon="K", layout="centered")
 
 st.markdown("""
 <style>
-    /* Font Cyberpunk / Terminal */
-    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+    /* Desain Chat: User di Kanan, AI di Kiri */
+    .stChatMessage { padding: 10px; border-radius: 10px; margin-bottom: 15px; }
     
-    html, body, [class*="st-"] {
-        font-family: 'Share Tech Mono', monospace;
+    /* Modifikasi Chat Bubble User */
+    [data-testid="stChatMessageUser"] { 
+        background-color: rgba(33, 150, 243, 0.1); 
+        flex-direction: row-reverse; 
     }
+    [data-testid="stChatMessageUser"] > div { text-align: right; }
     
-    /* Efek Chat Bubble: Hilangkan kotak, ganti dengan garis aksen di kiri */
-    .stChatMessage { 
-        background-color: transparent !important; 
-        border-left: 3px solid var(--primary-color) !important; 
-        padding-left: 15px !important; 
-        margin-bottom: 20px !important;
-    }
-    .stChatMessage > div { border: none !important; }
-    
-    /* Biarkan warna teks diurus otomatis oleh Streamlit */
-    .stMarkdown { color: inherit !important; }
-    
-    /* Sidebar dengan gaya garis putus-putus */
-    [data-testid="stSidebar"] { 
-        border-right: 1px dashed rgba(128, 128, 128, 0.4); 
-    }
-    
-    /* Header Kustom */
-    .cyber-header {
-        text-align: center;
-        letter-spacing: 4px;
-        text-transform: uppercase;
-        border-bottom: 1px solid var(--primary-color);
-        padding-bottom: 10px;
-        margin-bottom: 30px;
-        font-weight: bold;
-    }
+    /* Sembunyikan icon avatar default biar lebih bersih */
+    [data-testid="stChatMessageAvatar"] { display: none; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. SESSION & DATABASE ---
-if "user_email" not in st.session_state: st.session_state.user_email = ""
-if "messages" not in st.session_state: st.session_state.messages = []
-if "chat_id" not in st.session_state: st.session_state.chat_id = str(uuid.uuid4())
-if "uploader_key" not in st.session_state: st.session_state.uploader_key = str(uuid.uuid4())
-
 firebase_url = st.secrets.get("FIREBASE_DB_URL", "")
+
+# --- 2. DATABASE LOGIC (FIREBASE) ---
+def get_user_data(email):
+    if not firebase_url: return None
+    res = requests.get(f"{firebase_url}/users/{email.replace('.', '_')}.json")
+    return res.json() if res.status_code == 200 else None
+
+def save_user(email, password, name):
+    if not firebase_url: return
+    requests.put(f"{firebase_url}/users/{email.replace('.', '_')}.json", 
+                 json={"pw": password, "name": name})
 
 def save_chat(email, msgs, cid):
     if not firebase_url or not email: return
@@ -65,94 +48,167 @@ def get_chat_history(email):
     res = requests.get(url)
     return list(res.json().keys()) if res.status_code == 200 and res.json() else []
 
-# --- 3. LOGIN TERMINAL ---
-if not st.session_state.user_email:
-    st.markdown("<h1 class='cyber-header'>SYS.LOGIN // KarAI OS</h1>", unsafe_allow_html=True)
-    with st.columns([1,2,1])[1]:
-        email = st.text_input("ENTER ACCESS ID:")
-        if st.button("INITIALIZE CONNECTION"):
-            st.session_state.user_email = email
-            st.rerun()
+# --- 3. UI: LOGIN & RESET PASSWORD ---
+if "user" not in st.session_state:
+    st.markdown("<h1 style='text-align: center;'>Portal KarAI</h1>", unsafe_allow_html=True)
+    tab1, tab2 = st.tabs(["🔒 Login / Daftar", "🔑 Lupa Password"])
+    
+    with tab1:
+        st.info("Masukkan Email dan Password. Jika email belum terdaftar, sistem akan otomatis membuat akun baru.")
+        email = st.text_input("Email:", placeholder="contoh@gmail.com")
+        pw = st.text_input("Password:", type="password")
+        
+        if st.button("Masuk / Daftar", use_container_width=True):
+            if "@" not in email:
+                st.error("Format salah! Email wajib menggunakan '@'.")
+                st.stop()
+            if len(pw) < 4:
+                st.error("Password terlalu pendek (minimal 4 karakter).")
+                st.stop()
+                
+            data = get_user_data(email)
+            if data:
+                # User sudah ada, cek password
+                if data.get('pw') == pw:
+                    st.session_state.user = {"email": email, "name": data.get('name', email.split('@')[0])}
+                    st.rerun()
+                else: 
+                    st.error("Password salah! Silakan gunakan menu Lupa Password jika lupa.")
+            else:
+                # Akun baru, simpan ke database
+                name_default = email.split('@')[0]
+                save_user(email, pw, name_default)
+                st.session_state.user = {"email": email, "name": name_default}
+                st.rerun()
+
+    with tab2:
+        st.warning("Gunakan fitur ini hanya jika Anda sudah pernah membuat akun sebelumnya.")
+        email_reset = st.text_input("Email untuk Reset:", placeholder="contoh@gmail.com")
+        new_pw = st.text_input("Password Baru:", type="password")
+        
+        if st.button("Reset Password", use_container_width=True):
+            if "@" not in email_reset:
+                st.error("Email tidak valid.")
+            else:
+                data = get_user_data(email_reset)
+                if data: 
+                    save_user(email_reset, new_pw, data.get('name', email_reset.split('@')[0]))
+                    st.success("Password berhasil diperbarui! Silakan kembali ke tab Login.")
+                else: 
+                    st.error("Email belum terdaftar di database.")
     st.stop()
 
-# --- 4. SIDEBAR (CONTROL PANEL) ---
+# --- 4. SESSION INITIALIZATION ---
+if "page" not in st.session_state: st.session_state.page = "chat"
+if "messages" not in st.session_state: st.session_state.messages = []
+if "chat_id" not in st.session_state: st.session_state.chat_id = str(uuid.uuid4())
+if "uploader_key" not in st.session_state: st.session_state.uploader_key = str(uuid.uuid4())
+
+# --- 5. SIDEBAR (NAVIGASI & HISTORY) ---
 with st.sidebar:
-    try: st.image("logo_no_bg.png", width=70)
-    except: st.markdown("<h2 style='text-align:center;'>KarAI</h2>", unsafe_allow_html=True)
+    st.markdown(f"### 👤 Halo, {st.session_state.user['name']}")
+    st.divider()
     
-    st.write(f"📡 **USER:** `{st.session_state.user_email}`")
+    # Navigasi Menu
+    if st.button("💬 Buka Chat", use_container_width=True): st.session_state.page = "chat"; st.rerun()
+    if st.button("⚙️ Pengaturan Akun", use_container_width=True): st.session_state.page = "settings"; st.rerun()
     
-    if st.button("➕ NEW THREAD"):
-        st.session_state.messages = []
-        st.session_state.chat_id = str(uuid.uuid4())
-        st.rerun()
+    st.divider()
+    
+    # Fitur-fitur ini hanya muncul kalau user lagi di halaman Chat
+    if st.session_state.page == "chat":
+        if st.button("➕ Chat Baru", use_container_width=True):
+            st.session_state.messages = []
+            st.session_state.chat_id = str(uuid.uuid4())
+            st.rerun()
         
-    st.divider()
-    
-    models = ["⚡ Karai Basic", "🧠 Karai Expert", "🎨 Karai Creative"]
-    if "ikram" in st.session_state.user_email.lower(): models.extend(["🔥 Karai Creative S", "🌟 Karai Creative X"])
-    mode = st.selectbox("LLM ENGINE:", models)
-    
-    uploaded_file = st.file_uploader("UPLOAD VISION DATA:", type=['png', 'jpg', 'jpeg'], key=st.session_state.uploader_key)
-    
-    st.divider()
-    st.subheader("📁 DATA LOGS")
-    history = get_chat_history(st.session_state.user_email)
-    for cid in history:
-        col1, col2 = st.columns([4, 1])
-        with col1:
-            if st.button(f"LOG: {cid[:6]}...", key=f"btn_{cid}"):
-                url = f"{firebase_url}/chats/{st.session_state.user_email.replace('.', '_')}/{cid}.json"
-                st.session_state.messages = requests.get(url).json() or []
-                st.session_state.chat_id = cid
-                st.rerun()
-        with col2:
-            if st.button("🗑️", key=f"del_{cid}"):
-                requests.delete(f"{firebase_url}/chats/{st.session_state.user_email.replace('.', '_')}/{cid}.json")
-                if st.session_state.chat_id == cid: st.session_state.messages = []
-                st.rerun()
+        # Pilihan Model & Premium Logics
+        models = ["⚡ Karai Basic", "🧠 Karai Expert", "🎨 Karai Creative"]
+        if "ikram" in st.session_state.user['email'].lower() or "admin" in st.session_state.user['email'].lower(): 
+            models.extend(["🔥 Karai Premium S", "🌟 Karai Premium X"])
+        
+        st.session_state.selected_model = st.selectbox("Pilih Model:", models)
+        uploaded_file = st.file_uploader("Upload Foto:", type=['png', 'jpg', 'jpeg'], key=st.session_state.uploader_key)
+        
+        st.divider()
+        st.subheader("📜 Riwayat Chat")
+        history = get_chat_history(st.session_state.user['email'])
+        for cid in history:
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                if st.button(f"Chat: {cid[:6]}...", key=f"btn_{cid}"):
+                    url = f"{firebase_url}/chats/{st.session_state.user['email'].replace('.', '_')}/{cid}.json"
+                    res = requests.get(url)
+                    st.session_state.messages = res.json() if res.status_code == 200 and res.json() else []
+                    st.session_state.chat_id = cid
+                    st.rerun()
+            with col2:
+                if st.button("🗑️", key=f"del_{cid}"):
+                    requests.delete(f"{firebase_url}/chats/{st.session_state.user['email'].replace('.', '_')}/{cid}.json")
+                    if st.session_state.chat_id == cid: st.session_state.messages = []
+                    st.rerun()
 
     st.divider()
-    if st.button("TERMINATE SESSION"): 
-        st.session_state.user_email = ""
-        st.session_state.messages = []
+    if st.button("🚪 Logout", use_container_width=True): 
+        # Hapus semua sesi saat logout
+        for key in list(st.session_state.keys()): del st.session_state[key]
         st.rerun()
 
-# --- 5. MAIN CHAT INTERFACE ---
-st.markdown("<h1 class='cyber-header'>KarAI // SYSTEM ACTIVE</h1>", unsafe_allow_html=True)
-genai.configure(api_key=st.secrets.get("GOOGLE_API_KEY"))
-model = genai.GenerativeModel("gemini-2.5-flash-lite")
-
-# Tampilkan history chat
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]): st.markdown(m["content"])
-
-# Input dan proses
-if prompt := st.chat_input("TRANSMIT MESSAGE..."):
-    img = Image.open(uploaded_file) if uploaded_file else None
+# --- 6. PAGES ROUTING ---
+if st.session_state.page == "settings":
+    # Halaman Pengaturan
+    st.title("⚙️ Pengaturan Akun")
+    st.write(f"**Email Terdaftar:** `{st.session_state.user['email']}`")
     
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"): 
-        st.markdown(prompt)
-        if img: st.image(img, width=200)
+    new_name = st.text_input("Ubah Nama Panggilan Anda:", value=st.session_state.user['name'])
     
-    with st.spinner("⏳ PROCESSING DATA..."):
-        try:
-            payload = [prompt, img] if img else [prompt]
-            res = model.generate_content(payload)
-            
-            st.chat_message("assistant").markdown(res.text)
-            st.session_state.messages.append({"role": "assistant", "content": res.text})
-            
-            # Auto-save ke database
-            save_chat(st.session_state.user_email, st.session_state.messages, st.session_state.chat_id)
-            st.session_state.uploader_key = str(uuid.uuid4())
-            st.rerun()
-            
-        except exceptions.ResourceExhausted:
-            st.error("⚠️ [SYS.ERROR] API Rate Limit Exceeded. Auto-retrying in 10 seconds...")
-            time.sleep(10)
-            st.rerun()
-            
-        except Exception as e:
-            st.error(f"FATAL ERROR: {e}")
+    if st.button("💾 Simpan Perubahan"):
+        curr_data = get_user_data(st.session_state.user['email'])
+        pw_to_save = curr_data['pw'] if curr_data else "1234" # Fallback aman
+        save_user(st.session_state.user['email'], pw_to_save, new_name)
+        st.session_state.user['name'] = new_name
+        st.success("Nama berhasil diupdate! Silakan kembali ke menu 'Buka Chat' di sidebar.")
+
+elif st.session_state.page == "chat":
+    # Halaman Chat Utama
+    st.title("KarAI")
+    
+    # Konfigurasi API Gemini
+    genai.configure(api_key=st.secrets.get("GOOGLE_API_KEY", ""))
+    
+    # Ambil model berdasarkan pilihan di sidebar
+    model_name = "gemini-1.5-flash" # Default
+    if "Basic" in st.session_state.get("selected_model", ""): model_name = "gemini-1.5-flash"
+    elif "Expert" in st.session_state.get("selected_model", ""): model_name = "gemini-1.5-pro"
+    
+    model = genai.GenerativeModel(model_name)
+
+    # Tampilkan history chat di layar
+    for m in st.session_state.messages:
+        with st.chat_message(m["role"]): st.markdown(m["content"])
+
+    # Input User
+    if prompt := st.chat_input("Kirim pesan ke KarAI..."):
+        img = Image.open(uploaded_file) if 'uploaded_file' in locals() and uploaded_file else None
+        
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"): 
+            st.markdown(prompt)
+            if img: st.image(img, width=200)
+        
+        # Proses AI
+        with st.spinner("⏳ KarAI sedang berpikir..."):
+            try:
+                payload = [prompt, img] if img else [prompt]
+                response = model.generate_content(payload)
+                
+                with st.chat_message("assistant"): st.markdown(response.text)
+                st.session_state.messages.append({"role": "assistant", "content": response.text})
+                
+                # Auto-save setelah AI membalas
+                save_chat(st.session_state.user['email'], st.session_state.messages, st.session_state.chat_id)
+                st.session_state.uploader_key = str(uuid.uuid4()) # Reset uploader gambar
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"⚠️ Terjadi kesalahan API (Rate Limit / Gangguan Koneksi). Detail: {e}")

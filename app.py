@@ -1,10 +1,10 @@
 import streamlit as st
-import google.generativeai as genai
 from PIL import Image
 import requests
 import uuid
 import urllib.parse
 import json
+import base64
 
 # --- 1. SETUP & CSS (TEMA AMAN, CHAT KANAN-KIRI, & NO SPINNER ICON) ---
 st.set_page_config(page_title="KarAI OS", page_icon="🤖", layout="centered")
@@ -25,13 +25,8 @@ st.markdown("""
     [data-testid="stChatMessageAvatar"] { display: none; }
     
     /* HAPUS ICON JAM PASIR SAAT LOADING */
-    [data-testid="stSpinner"] > div > div {
-        display: none !important;
-    }
-    [data-testid="stSpinner"] {
-        background-color: transparent !important;
-        color: inherit !important;
-    }
+    [data-testid="stSpinner"] > div > div { display: none !important; }
+    [data-testid="stSpinner"] { background-color: transparent !important; color: inherit !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -62,7 +57,6 @@ def get_chat_history(email):
 
 # --- 3. UI: LOGIN & RESET PASSWORD (UBAH TEKS PORTAL) ---
 if "user" not in st.session_state:
-    # UBAH TEKS PORTAL KARAI MENJADI LOGIN TO KARAI
     st.markdown("<h1 style='text-align: center;'>Login to KarAI</h1>", unsafe_allow_html=True)
     tab1, tab2 = st.tabs(["🔒 Login / Daftar", "🔑 Lupa Password"])
     
@@ -96,7 +90,8 @@ if "user" not in st.session_state:
                 st.session_state.user = {"email": email, "name": name_default, "premium": False}
                 st.rerun()
 
-    with tab tab2:
+    # FIX TYPO SYNTAX ERROR DI SINI
+    with tab2:
         st.warning("Gunakan fitur ini jika Anda sudah memiliki akun.")
         email_reset = st.text_input("Email untuk Reset:", placeholder="contoh@gmail.com")
         new_pw = st.text_input("Password Baru:", type="password")
@@ -118,7 +113,6 @@ if "page" not in st.session_state: st.session_state.page = "chat"
 if "messages" not in st.session_state: st.session_state.messages = []
 if "chat_id" not in st.session_state: st.session_state.chat_id = str(uuid.uuid4())
 if "uploader_key" not in st.session_state: st.session_state.uploader_key = str(uuid.uuid4())
-# Fitur Rem Cakram untuk Voice Mode agar tidak looping
 if "last_audio_bytes" not in st.session_state: st.session_state.last_audio_bytes = None
 if "speak_text" not in st.session_state: st.session_state.speak_text = ""
 
@@ -140,7 +134,6 @@ with st.sidebar:
             st.session_state.last_audio_bytes = None
             st.rerun()
         
-        # MODEL DEFAULT SEKARANG PAKE GROQ UNLIMITED
         models = [
             "🚀 Karai Basic (Groq Llama 8B)", 
             "🧠 Karai Expert (Groq Llama 70B)",
@@ -149,17 +142,14 @@ with st.sidebar:
         ]
         
         if st.session_state.user.get('premium', False):
-            # Gemini Vision cuma gw tampilin kalau premium, kalau gak premium, gw sembunyiin
-            # Biar gak sering kena error 404 pas lagi bermasalah server Google ny
             models.extend([
-                "🔥 Karai Premium Vision (Gemini 1.5 Flash)", 
-                "🌟 Karai Premium X (Gemini 1.5 Pro)"
+                "🔥 Karai Premium Vision (Groq Llama Vision)", 
+                "🌟 Karai Premium X (Groq Llama 70B)"
             ])
         
         st.session_state.selected_model = st.selectbox("Pilih Model Engine:", models)
         
-        # Upload gambar cuma muncul kalau model Premium Vision dipilih
-        if "Premium" in st.session_state.selected_model:
+        if "Premium Vision" in st.session_state.selected_model:
             uploaded_file = st.file_uploader("Upload Foto:", type=['png', 'jpg', 'jpeg'], key=st.session_state.uploader_key)
         else:
             uploaded_file = None
@@ -196,7 +186,6 @@ if st.session_state.page == "settings":
     st.divider()
     
     st.subheader("🔑 Akses Premium")
-    # Sembunyikan input token dengan type="password"
     secret_token = st.text_input("Masukkan Token Khusus:", type="password")
     
     if st.button("💾 Simpan Perubahan"):
@@ -219,7 +208,6 @@ elif st.session_state.page == "chat":
     st.title("KarAI")
     selected_model = st.session_state.get("selected_model", "🚀 Karai Basic (Groq Llama 8B)")
     
-    # Eksekusi suara TTS bahasa Indonesia jika ada pesan baru di Voice Mode
     if st.session_state.get("speak_text"):
         clean_text = st.session_state.speak_text.replace("'", "\\'").replace("\n", " ").replace('"', '\\"')
         st.components.v1.html(f"""
@@ -229,25 +217,21 @@ elif st.session_state.page == "chat":
                 window.speechSynthesis.speak(msg);
             </script>
         """, height=0)
-        st.session_state.speak_text = "" # Hapus biar gak ngulang pas rerun
+        st.session_state.speak_text = ""
     
-    # Tampilkan percakapan lama
     for m in st.session_state.messages:
         with st.chat_message(m["role"]): st.markdown(m["content"])
 
-    # Logika Input
     prompt = None
     if "Voice" in selected_model:
         st.warning("🎙️ Mode Voice Aktif: Silakan rekam suara Anda.")
         audio_file = st.audio_input("Rekam:")
         
-        # REM CAKRAM: Pastikan rekaman nggak di-looping
         if audio_file:
             audio_bytes = audio_file.getvalue()
             if st.session_state.last_audio_bytes != audio_bytes:
                 st.session_state.last_audio_bytes = audio_bytes
                 
-                # UBAH TEKS LOADING SAAT MENYALIN SUARA
                 with st.spinner("⏳ KarAI sedang berfikir..."):
                     try:
                         headers = {"Authorization": f"Bearer {groq_key}"}
@@ -266,7 +250,6 @@ elif st.session_state.page == "chat":
     else:
         prompt = st.chat_input("Kirim pesan ke KarAI...")
 
-    # Pemrosesan Utama AI
     if prompt:
         img = Image.open(uploaded_file) if ('uploaded_file' in locals() and uploaded_file) else None
         
@@ -275,38 +258,64 @@ elif st.session_state.page == "chat":
             st.markdown(prompt)
             if img: st.image(img, width=200)
         
-        # UBAH TEKS LOADING SAAT AI BERPIKIR
         with st.spinner("⏳ KarAI sedang berfikir..."):
             try:
                 ai_response = ""
                 
-                # --- MESIN 1: PREMIUM VISION (GEMINI) ---
-                if "Premium" in selected_model:
-                    genai.configure(api_key=st.secrets.get("GOOGLE_API_KEY", ""))
-                    # FIX 404 ERROR: Menggunakan model-latest yang lebih stabil
-                    gemini_model = "gemini-1.5-flash-latest" if "Vision" in selected_model else "gemini-1.5-pro-latest"
-                    model = genai.GenerativeModel(gemini_model)
+                # --- MESIN 1: PREMIUM VISION (MENGGUNAKAN GROQ VISION AGAR TIDAK ADA ERROR GEMINI) ---
+                if "Premium Vision" in selected_model:
+                    if not groq_key:
+                        st.error("⚠️ API Key Groq belum dipasang di Secrets!")
+                        st.session_state.messages.pop()
+                        st.stop()
+                        
+                    headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
                     
-                    payload = [prompt, img] if img else [prompt]
-                    response = model.generate_content(payload)
-                    ai_response = response.text
+                    if uploaded_file:
+                        base64_image = base64.b64encode(uploaded_file.getvalue()).decode('utf-8')
+                        image_url = f"data:image/jpeg;base64,{base64_image}"
+                        
+                        payload = {
+                            "model": "llama-3.2-11b-vision-preview",
+                            "messages": [
+                                {
+                                    "role": "user",
+                                    "content": [
+                                        {"type": "text", "text": prompt},
+                                        {"type": "image_url", "image_url": {"url": image_url}}
+                                    ]
+                                }
+                            ]
+                        }
+                    else:
+                        payload = {
+                            "model": "llama-3.3-70b-versatile",
+                            "messages": [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
+                        }
+                    
+                    res = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
+                    
+                    if res.status_code == 200:
+                        ai_response = res.json()["choices"][0]["message"]["content"]
+                    else:
+                        st.error(f"Groq API Error: {res.text}")
+                        st.session_state.messages.pop()
+                        st.stop()
 
                 # --- MESIN 2: CREATIVE (IMAGE GENERATION) ---
                 elif "Creative" in selected_model:
                     encoded_prompt = urllib.parse.quote(prompt)
-                    # API generator gambar gratis & unlimited token
                     img_id = uuid.uuid4().int & 100000
                     image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=512&height=512&seed={img_id}&nologo=true"
                     ai_response = f"Berikut adalah gambar untuk: **{prompt}**\n\n![Generated Image]({image_url})"
                 
-                # --- MESIN 3: BASIC, EXPERT, & VOICE (DIPINDAH KE GROQ UNLIMITED KARENA GEMINI EROR) ---
+                # --- MESIN 3: BASIC, EXPERT, & VOICE (GROQ LLAMA) ---
                 else:
                     if not groq_key:
                         st.error("⚠️ API Key Groq belum dipasang di Secrets!")
                         st.session_state.messages.pop()
                         st.stop()
                         
-                    # Tentukan model Groq sesuai pilihan
                     model_target = "llama-3.1-8b-instant" if "Basic" in selected_model else "llama-3.3-70b-versatile"
                         
                     headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
@@ -329,14 +338,13 @@ elif st.session_state.page == "chat":
                 st.session_state.messages.append({"role": "assistant", "content": ai_response})
                 save_chat(st.session_state.user['email'], st.session_state.messages, st.session_state.chat_id)
                 
-                # Triger Suara TTS jika mode Voice
                 if "Voice" in selected_model:
                     st.session_state.speak_text = ai_response
                 
+                st.session_state.uploader_key = str(uuid.uuid4())
                 st.rerun()
                 
             except Exception as e:
-                st.error(f"⚠️ Terjadi Kesalahan API (Kemungkinan Rate Limit / Server Sibuk). Detail: {e}")
-                # Hapus prompt user dari layar supaya gak nge-stuck/blank
+                st.error(f"⚠️ Terjadi Kesalahan API. Detail: {e}")
                 if len(st.session_state.messages) > 0:
                     st.session_state.messages.pop()

@@ -1,25 +1,32 @@
 import streamlit as st
-import google.generativeai as genai
 from PIL import Image
 import requests
 import uuid
+import urllib.parse
+import json
 
-# --- 1. SETUP & CSS ---
-st.set_page_config(page_title="KarAI", page_icon="K", layout="centered")
+# --- 1. SETUP & CSS (TEMA AMAN & CHAT KANAN-KIRI) ---
+st.set_page_config(page_title="KarAI OS", page_icon="🤖", layout="centered")
 
 st.markdown("""
 <style>
+    /* Desain Chat: User di Kanan, AI di Kiri */
     .stChatMessage { padding: 10px; border-radius: 10px; margin-bottom: 15px; }
+    
+    /* Modifikasi Chat Bubble User */
     [data-testid="stChatMessageUser"] { 
         background-color: rgba(33, 150, 243, 0.1); 
         flex-direction: row-reverse; 
     }
     [data-testid="stChatMessageUser"] > div { text-align: right; }
+    
+    /* Sembunyikan icon avatar default biar lebih bersih */
     [data-testid="stChatMessageAvatar"] { display: none; }
 </style>
 """, unsafe_allow_html=True)
 
 firebase_url = st.secrets.get("FIREBASE_DB_URL", "")
+groq_key = st.secrets.get("GROQ_API_KEY", "")
 
 # --- 2. DATABASE LOGIC (FIREBASE) ---
 def get_user_data(email):
@@ -45,7 +52,7 @@ def get_chat_history(email):
 
 # --- 3. UI: LOGIN & RESET PASSWORD ---
 if "user" not in st.session_state:
-    st.markdown("<h1 style='text-align: center;'>Portal KarAI</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>Login to KarAI</h1>", unsafe_allow_html=True)
     tab1, tab2 = st.tabs(["🔒 Login / Daftar", "🔑 Lupa Password"])
     
     with tab1:
@@ -97,7 +104,7 @@ if "messages" not in st.session_state: st.session_state.messages = []
 if "chat_id" not in st.session_state: st.session_state.chat_id = str(uuid.uuid4())
 if "uploader_key" not in st.session_state: st.session_state.uploader_key = str(uuid.uuid4())
 
-# --- 5. SIDEBAR ---
+# --- 5. SIDEBAR (NAVIGASI & HISTORY) ---
 with st.sidebar:
     st.markdown(f"### 👤 Halo, {st.session_state.user['name']}")
     st.divider()
@@ -113,15 +120,15 @@ with st.sidebar:
             st.session_state.chat_id = str(uuid.uuid4())
             st.rerun()
         
-        # GROQ UNLIMITED SEKARANG DIBUKA BUAT SEMUA ORANG!
+        # MODEL BARU SESUAI PERMINTAAN
         models = [
-            "🚀 Karai Unlimited (Groq Llama 3)", 
-            "⚡ Karai Basic (Gemini)", 
-            "🧠 Karai Expert (Gemini)"
+            "🚀 Karai Basic (Groq Llama 8B)", 
+            "🧠 Karai Expert (Groq Llama 70B)",
+            "🎨 Karai Creative (Image Generator)",
+            "📞 Karai Voice (Voice Mode)"
         ]
         
-        st.session_state.selected_model = st.selectbox("Pilih Model:", models)
-        uploaded_file = st.file_uploader("Upload Foto (Khusus Gemini):", type=['png', 'jpg', 'jpeg'], key=st.session_state.uploader_key)
+        st.session_state.selected_model = st.selectbox("Pilih Model Engine:", models)
         
         st.divider()
         st.subheader("📜 Riwayat Chat")
@@ -161,37 +168,68 @@ if st.session_state.page == "settings":
 
 elif st.session_state.page == "chat":
     st.title("KarAI")
+    selected_model = st.session_state.get("selected_model", "🚀 Karai Basic (Groq Llama 8B)")
     
+    # Tampilkan percakapan lama
     for m in st.session_state.messages:
         with st.chat_message(m["role"]): st.markdown(m["content"])
 
-    if prompt := st.chat_input("Kirim pesan ke KarAI..."):
-        img = Image.open(uploaded_file) if 'uploaded_file' in locals() and uploaded_file else None
-        selected_model = st.session_state.get("selected_model", "")
-        
-        if img and "Unlimited" in selected_model:
-            st.error("⚠️ Model 'Unlimited (Groq)' hanya untuk Teks. Ubah ke Gemini di sidebar jika ingin kirim gambar.")
-            st.stop()
+    # Logika Input Khusus untuk Mode Voice / Suara
+    prompt = None
+    if "Voice" in selected_model:
+        st.warning("🎙️ Mode Voice Aktif: Silakan rekam suara Anda di bawah ini untuk memulai obrolan.")
+        audio_file = st.audio_input("Rekam suara Anda:")
+        if audio_file and not st.session_state.get("audio_processed", False):
+            with st.spinner("🔊 Menyalin suara Anda menjadi teks..."):
+                try:
+                    headers = {"Authorization": f"Bearer {groq_key}"}
+                    files = {"file": ("audio.wav", audio_file.read(), "audio/wav")}
+                    data = {"model": "whisper-large-v3", "language": "id"}
+                    res = requests.post("https://api.groq.com/openai/v1/audio/transcriptions", headers=headers, files=files, data=data)
+                    if res.status_code == 200:
+                        prompt = res.json().get("text", "")
+                    else:
+                        st.error("Gagal memproses audio lewat Groq Whisper.")
+                except Exception as e:
+                    st.error(f"Error STT: {e}")
+    else:
+        prompt = st.chat_input("Kirim pesan ke KarAI...")
 
+    # Jalankan pemrosesan jika ada input teks atau hasil transkripsi suara
+    if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"): 
-            st.markdown(prompt)
-            if img: st.image(img, width=200)
+        with st.chat_message("user"): st.markdown(prompt)
         
-        with st.spinner("⏳ KarAI sedang berpikir..."):
+        with st.spinner("KarAI sedang berpikir..."):
             try:
                 ai_response = ""
                 
-                # --- MESIN 1: GROQ UNLIMITED ---
-                if "Unlimited" in selected_model:
-                    groq_key = st.secrets.get("GROQ_API_KEY", "")
+                # --- AKSEN MODEL 1: CREATIVE (IMAGE GENERATION) ---
+                if "Creative" in selected_model:
+                    encoded_prompt = urllib.parse.quote(prompt)
+                    # Menggunakan API Pollinations gratis & tanpa token limit untuk generate gambar
+                    img_id = uuid.uuid4().int & 100000
+                    image_url = f"https://image.pollinations.ai/p/{encoded_prompt}?width=512&height=512&seed={img_id}&enhance=false"
+                    ai_response = f"Berikut adalah gambar yang berhasil dibuat untuk perintah: **{prompt}**\n\n![Generated Image]({image_url})"
+                
+                # --- AKSEN MODEL 2: BASIC, EXPERT, & VOICE (TEXT INFERENCE VIA GROQ) ---
+                else:
                     if not groq_key:
-                        st.error("⚠️ API Key Groq belum dipasang di Secrets Streamlit Cloud!")
-                        st.session_state.messages.pop() 
+                        st.error("⚠️ API Key Groq belum dipasang di Secrets Streamlit!")
+                        st.session_state.messages.pop()
                         st.stop()
                         
+                    # Tentukan model Groq sesuai pilihan
+                    if "Basic" in selected_model:
+                        model_target = "llama-3.1-8b-instant"
+                    else:
+                        model_target = "llama-3.3-70b-versatile" # Dipakai untuk Expert dan Voice Mode
+                        
                     headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
-                    payload = {"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}]}
+                    payload = {
+                        "model": model_target,
+                        "messages": [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
+                    }
                     res = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
                     
                     if res.status_code == 200:
@@ -200,26 +238,29 @@ elif st.session_state.page == "chat":
                         st.error(f"Groq API Error: {res.text}")
                         st.session_state.messages.pop()
                         st.stop()
-
-                # --- MESIN 2: GEMINI ---
-                else:
-                    genai.configure(api_key=st.secrets.get("GOOGLE_API_KEY", ""))
-                    # Fix: Google mematikan gemini-pro, kita pakai 1.5 flash & pro murni
-                    gemini_model = "gemini-1.5-flash" if "Basic" in selected_model else "gemini-1.5-pro"
-                    
-                    model = genai.GenerativeModel(gemini_model)
-                    payload = [prompt, img] if img else [prompt]
-                    response = model.generate_content(payload)
-                    ai_response = response.text
                 
-                with st.chat_message("assistant"): st.markdown(ai_response)
+                # Cetak Balasan AI ke layar
+                with st.chat_message("assistant"): 
+                    st.markdown(ai_response)
+                
                 st.session_state.messages.append({"role": "assistant", "content": ai_response})
-                
                 save_chat(st.session_state.user['email'], st.session_state.messages, st.session_state.chat_id)
+                
+                # JIKA MODE VOICE: Pemicu JavaScript untuk merubah teks AI menjadi suara (TTS) Bahasa Indonesia
+                if "Voice" in selected_model:
+                    clean_text = ai_response.replace("'", "\\'").replace("\n", " ")
+                    st.components.v1.html(f"""
+                        <script>
+                            var msg = new SpeechSynthesisUtterance('{clean_text}');
+                            msg.lang = 'id-ID';
+                            window.speechSynthesis.speak(msg);
+                        </script>
+                    """, height=0)
+                
                 st.session_state.uploader_key = str(uuid.uuid4())
                 st.rerun()
                 
             except Exception as e:
-                st.error(f"⚠️ Terjadi Kesalahan API. Detail: {e}")
+                st.error(f"⚠️ Terjadi Kesalahan Sistem. Detail: {e}")
                 if len(st.session_state.messages) > 0:
                     st.session_state.messages.pop()

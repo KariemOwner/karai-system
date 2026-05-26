@@ -3,7 +3,6 @@ from PIL import Image
 import requests
 import uuid
 import urllib.parse
-import json
 
 # --- 1. SETUP & CSS (TEMA AMAN & CHAT KANAN-KIRI) ---
 st.set_page_config(page_title="KarAI OS", page_icon="🤖", layout="centered")
@@ -12,15 +11,11 @@ st.markdown("""
 <style>
     /* Desain Chat: User di Kanan, AI di Kiri */
     .stChatMessage { padding: 10px; border-radius: 10px; margin-bottom: 15px; }
-    
-    /* Modifikasi Chat Bubble User */
     [data-testid="stChatMessageUser"] { 
         background-color: rgba(33, 150, 243, 0.1); 
         flex-direction: row-reverse; 
     }
     [data-testid="stChatMessageUser"] > div { text-align: right; }
-    
-    /* Sembunyikan icon avatar default biar lebih bersih */
     [data-testid="stChatMessageAvatar"] { display: none; }
 </style>
 """, unsafe_allow_html=True)
@@ -56,7 +51,7 @@ if "user" not in st.session_state:
     tab1, tab2 = st.tabs(["🔒 Login / Daftar", "🔑 Lupa Password"])
     
     with tab1:
-        st.info("Masukkan Email dan Password. Jika email belum terdaftar, sistem akan otomatis membuat akun baru.")
+        st.info("Masukkan Email dan Password. Jika email belum terdaftar, otomatis membuat akun baru.")
         email = st.text_input("Email:", placeholder="contoh@gmail.com")
         pw = st.text_input("Password:", type="password")
         
@@ -74,7 +69,7 @@ if "user" not in st.session_state:
                     st.session_state.user = {"email": email, "name": data.get('name', email.split('@')[0])}
                     st.rerun()
                 else: 
-                    st.error("Password salah! Silakan gunakan menu Lupa Password jika lupa.")
+                    st.error("Password salah! Gunakan menu Lupa Password jika lupa.")
             else:
                 name_default = email.split('@')[0]
                 save_user(email, pw, name_default)
@@ -82,7 +77,7 @@ if "user" not in st.session_state:
                 st.rerun()
 
     with tab2:
-        st.warning("Gunakan fitur ini hanya jika Anda sudah pernah membuat akun sebelumnya.")
+        st.warning("Gunakan fitur ini jika Anda sudah memiliki akun.")
         email_reset = st.text_input("Email untuk Reset:", placeholder="contoh@gmail.com")
         new_pw = st.text_input("Password Baru:", type="password")
         
@@ -93,18 +88,20 @@ if "user" not in st.session_state:
                 data = get_user_data(email_reset)
                 if data: 
                     save_user(email_reset, new_pw, data.get('name', email_reset.split('@')[0]))
-                    st.success("Password berhasil diperbarui! Silakan kembali ke tab Login.")
+                    st.success("Password berhasil diperbarui! Silakan Login.")
                 else: 
-                    st.error("Email belum terdaftar di database.")
+                    st.error("Email belum terdaftar.")
     st.stop()
 
 # --- 4. SESSION INITIALIZATION ---
 if "page" not in st.session_state: st.session_state.page = "chat"
 if "messages" not in st.session_state: st.session_state.messages = []
 if "chat_id" not in st.session_state: st.session_state.chat_id = str(uuid.uuid4())
-if "uploader_key" not in st.session_state: st.session_state.uploader_key = str(uuid.uuid4())
+# Fitur Rem Cakram untuk Audio & TTS
+if "last_audio_bytes" not in st.session_state: st.session_state.last_audio_bytes = None
+if "speak_text" not in st.session_state: st.session_state.speak_text = ""
 
-# --- 5. SIDEBAR (NAVIGASI & HISTORY) ---
+# --- 5. SIDEBAR ---
 with st.sidebar:
     st.markdown(f"### 👤 Halo, {st.session_state.user['name']}")
     st.divider()
@@ -118,9 +115,9 @@ with st.sidebar:
         if st.button("➕ Chat Baru", use_container_width=True):
             st.session_state.messages = []
             st.session_state.chat_id = str(uuid.uuid4())
+            st.session_state.last_audio_bytes = None
             st.rerun()
         
-        # MODEL BARU SESUAI PERMINTAAN
         models = [
             "🚀 Karai Basic (Groq Llama 8B)", 
             "🧠 Karai Expert (Groq Llama 70B)",
@@ -141,6 +138,7 @@ with st.sidebar:
                     res = requests.get(url)
                     st.session_state.messages = res.json() if res.status_code == 200 and res.json() else []
                     st.session_state.chat_id = cid
+                    st.session_state.last_audio_bytes = None
                     st.rerun()
             with col2:
                 if st.button("🗑️", key=f"del_{cid}"):
@@ -170,32 +168,53 @@ elif st.session_state.page == "chat":
     st.title("KarAI")
     selected_model = st.session_state.get("selected_model", "🚀 Karai Basic (Groq Llama 8B)")
     
+    # Eksekusi Suara (TTS) jika ada pesan baru di sesi Voice
+    if st.session_state.get("speak_text"):
+        clean_text = st.session_state.speak_text.replace("'", "\\'").replace("\n", " ").replace('"', '\\"')
+        st.components.v1.html(f"""
+            <script>
+                var msg = new SpeechSynthesisUtterance('{clean_text}');
+                msg.lang = 'id-ID';
+                window.speechSynthesis.speak(msg);
+            </script>
+        """, height=0)
+        st.session_state.speak_text = "" # Langsung hapus biar gak ngulang terus-terusan
+    
     # Tampilkan percakapan lama
     for m in st.session_state.messages:
         with st.chat_message(m["role"]): st.markdown(m["content"])
 
-    # Logika Input Khusus untuk Mode Voice / Suara
+    # Logika Input
     prompt = None
     if "Voice" in selected_model:
-        st.warning("🎙️ Mode Voice Aktif: Silakan rekam suara Anda di bawah ini untuk memulai obrolan.")
-        audio_file = st.audio_input("Rekam suara Anda:")
-        if audio_file and not st.session_state.get("audio_processed", False):
-            with st.spinner("🔊 Menyalin suara Anda menjadi teks..."):
-                try:
-                    headers = {"Authorization": f"Bearer {groq_key}"}
-                    files = {"file": ("audio.wav", audio_file.read(), "audio/wav")}
-                    data = {"model": "whisper-large-v3", "language": "id"}
-                    res = requests.post("https://api.groq.com/openai/v1/audio/transcriptions", headers=headers, files=files, data=data)
-                    if res.status_code == 200:
-                        prompt = res.json().get("text", "")
-                    else:
-                        st.error("Gagal memproses audio lewat Groq Whisper.")
-                except Exception as e:
-                    st.error(f"Error STT: {e}")
+        st.warning("🎙️ Mode Voice Aktif: Silakan rekam suara Anda.")
+        audio_file = st.audio_input("Rekam:")
+        
+        # REM CAKRAM: Pastikan rekaman nggak di-looping
+        if audio_file:
+            audio_bytes = audio_file.getvalue()
+            if st.session_state.last_audio_bytes != audio_bytes:
+                st.session_state.last_audio_bytes = audio_bytes
+                
+                with st.spinner("🔊 Menyalin suara Anda menjadi teks..."):
+                    try:
+                        headers = {"Authorization": f"Bearer {groq_key}"}
+                        files = {"file": ("audio.wav", audio_bytes, "audio/wav")}
+                        data = {"model": "whisper-large-v3", "language": "id"}
+                        res = requests.post("https://api.groq.com/openai/v1/audio/transcriptions", headers=headers, files=files, data=data)
+                        
+                        if res.status_code == 200:
+                            prompt = res.json().get("text", "")
+                        else:
+                            st.error(f"Gagal memproses audio: {res.text}")
+                    except Exception as e:
+                        st.error(f"Error STT: {e}")
+            else:
+                prompt = None # Abaikan jika audio ini sudah pernah diproses
     else:
         prompt = st.chat_input("Kirim pesan ke KarAI...")
 
-    # Jalankan pemrosesan jika ada input teks atau hasil transkripsi suara
+    # Pemrosesan Utama AI
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
@@ -204,26 +223,21 @@ elif st.session_state.page == "chat":
             try:
                 ai_response = ""
                 
-                # --- AKSEN MODEL 1: CREATIVE (IMAGE GENERATION) ---
+                # --- MESIN 1: CREATIVE (IMAGE GENERATION) ---
                 if "Creative" in selected_model:
                     encoded_prompt = urllib.parse.quote(prompt)
-                    # Menggunakan API Pollinations gratis & tanpa token limit untuk generate gambar
                     img_id = uuid.uuid4().int & 100000
-                    image_url = f"https://image.pollinations.ai/p/{encoded_prompt}?width=512&height=512&seed={img_id}&enhance=false"
-                    ai_response = f"Berikut adalah gambar yang berhasil dibuat untuk perintah: **{prompt}**\n\n![Generated Image]({image_url})"
+                    image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=512&height=512&seed={img_id}&nologo=true"
+                    ai_response = f"Berikut adalah gambar untuk: **{prompt}**\n\n![Generated Image]({image_url})"
                 
-                # --- AKSEN MODEL 2: BASIC, EXPERT, & VOICE (TEXT INFERENCE VIA GROQ) ---
+                # --- MESIN 2: BASIC, EXPERT, & VOICE (GROQ LLAMA) ---
                 else:
                     if not groq_key:
-                        st.error("⚠️ API Key Groq belum dipasang di Secrets Streamlit!")
+                        st.error("⚠️ API Key Groq belum dipasang di Secrets!")
                         st.session_state.messages.pop()
                         st.stop()
                         
-                    # Tentukan model Groq sesuai pilihan
-                    if "Basic" in selected_model:
-                        model_target = "llama-3.1-8b-instant"
-                    else:
-                        model_target = "llama-3.3-70b-versatile" # Dipakai untuk Expert dan Voice Mode
+                    model_target = "llama-3.1-8b-instant" if "Basic" in selected_model else "llama-3.3-70b-versatile"
                         
                     headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
                     payload = {
@@ -239,25 +253,16 @@ elif st.session_state.page == "chat":
                         st.session_state.messages.pop()
                         st.stop()
                 
-                # Cetak Balasan AI ke layar
-                with st.chat_message("assistant"): 
-                    st.markdown(ai_response)
+                # Cetak Balasan
+                with st.chat_message("assistant"): st.markdown(ai_response)
                 
                 st.session_state.messages.append({"role": "assistant", "content": ai_response})
                 save_chat(st.session_state.user['email'], st.session_state.messages, st.session_state.chat_id)
                 
-                # JIKA MODE VOICE: Pemicu JavaScript untuk merubah teks AI menjadi suara (TTS) Bahasa Indonesia
+                # Triger Suara TTS jika mode Voice
                 if "Voice" in selected_model:
-                    clean_text = ai_response.replace("'", "\\'").replace("\n", " ")
-                    st.components.v1.html(f"""
-                        <script>
-                            var msg = new SpeechSynthesisUtterance('{clean_text}');
-                            msg.lang = 'id-ID';
-                            window.speechSynthesis.speak(msg);
-                        </script>
-                    """, height=0)
+                    st.session_state.speak_text = ai_response
                 
-                st.session_state.uploader_key = str(uuid.uuid4())
                 st.rerun()
                 
             except Exception as e:

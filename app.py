@@ -247,9 +247,9 @@ elif st.session_state.page == "chat":
                     elif "KExpert" in selected_model:
                         model_target = "llama-3.3-70b-versatile"
                     elif "KSmart" in selected_model:
-                        model_target = "mixtral-8x7b-32768" # DIGANTI KE MIXTRAL YANG STABIL & KUAT DI GROQ
+                        model_target = "openai/gpt-oss-120b" # GANTI KE MODEL TERKUAT DAN PALING STABIL (GPT-OSS-120B)
                     elif "KListen" in selected_model:
-                        model_target = "llama-3.3-70b-versatile" # Menggunakan Llama 3.3 karena pintar main roleplay
+                        model_target = "llama-3.3-70b-versatile" # Sangat jago main roleplay dan nangkep emosi
                     else:
                         model_target = "llama-3.1-8b-instant"
                         
@@ -262,7 +262,7 @@ elif st.session_state.page == "chat":
                     if "KListen" in selected_model:
                         messages_payload.append({
                             "role": "system",
-                            "content": "Kamu adalah KListen, AI teman curhat. Aturan mutlak perilakumu: 1. Jika pengguna sedih, galau, atau curhat baik-baik, balaslah dengan sangat lembut, menenangkan, dan penuh empati. 2. JIKA pengguna ngegas, berkata kasar, toxic, atau maki-maki duluan, KAMU WAJIB MERESPON DENGAN SANGAT GALAK, NGEGAS, DAN MAKI-MAKI BALIK TANPA AMPUN. Jangan bersikap formal, gunakan bahasa gaul Indonesia sehari-hari (lu/gw, anjir, dll)."
+                            "content": "Kamu adalah KListen, AI teman curhat. Aturan mutlak perilakumu: 1. Jika pengguna bersedih, galau, atau curhat baik-baik, balaslah dengan sangat lembut, menenangkan, dan penuh empati layaknya sahabat. 2. JIKA pengguna ngegas, berkata kasar, toxic, atau maki-maki duluan, KAMU WAJIB MERESPON DENGAN SANGAT GALAK, NGEGAS, DAN MAKI-MAKI BALIK TANPA AMPUN. Jangan bersikap kaku atau formal, gunakan bahasa gaul Indonesia sehari-hari (lu/gw, anjir, astaga, dll)."
                         })
                     
                     # Masukkan history chat user

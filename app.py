@@ -1,30 +1,34 @@
 import streamlit as st
-import google.generativeai as genai
 import requests
 import uuid
+import urllib.parse
 
-# --- 1. SETUP & CSS ---
+# --- 1. SETUP & CSS (TEMA AMAN, CHAT KANAN-KIRI, & NO SPINNER ICON) ---
 st.set_page_config(page_title="KarAI OS", page_icon="🤖", layout="centered")
 
 st.markdown("""
 <style>
+    /* Desain Chat: User di Kanan, AI di Kiri */
     .stChatMessage { padding: 10px; border-radius: 10px; margin-bottom: 15px; }
+    
+    /* Modifikasi Chat Bubble User */
     [data-testid="stChatMessageUser"] { 
         background-color: rgba(33, 150, 243, 0.1); 
         flex-direction: row-reverse; 
     }
     [data-testid="stChatMessageUser"] > div { text-align: right; }
+    
+    /* Sembunyikan icon avatar default biar lebih bersih */
     [data-testid="stChatMessageAvatar"] { display: none; }
+    
+    /* Hapus icon jam pasir/loading default Streamlit */
     [data-testid="stSpinner"] > div > div { display: none !important; }
     [data-testid="stSpinner"] { background-color: transparent !important; color: inherit !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# AMBIL SEMUA API KEY DARI SECRETS
 firebase_url = st.secrets.get("FIREBASE_DB_URL", "")
 groq_key = st.secrets.get("GROQ_API_KEY", "")
-anthropic_key = st.secrets.get("ANTHROPIC_API_KEY", "")
-openai_key = st.secrets.get("OPENAI_API_KEY", "")
 
 # --- 2. DATABASE LOGIC (FIREBASE) ---
 def get_user_data(email):
@@ -32,10 +36,10 @@ def get_user_data(email):
     res = requests.get(f"{firebase_url}/users/{email.replace('.', '_')}.json")
     return res.json() if res.status_code == 200 else None
 
-def save_user(email, password, name):
+def save_user(email, password, name, is_premium=False):
     if not firebase_url: return
     requests.put(f"{firebase_url}/users/{email.replace('.', '_')}.json", 
-                 json={"pw": password, "name": name})
+                 json={"pw": password, "name": name, "premium": is_premium})
 
 def save_chat(email, msgs, cid):
     if not firebase_url or not email: return
@@ -48,7 +52,7 @@ def get_chat_history(email):
     res = requests.get(url)
     return list(res.json().keys()) if res.status_code == 200 and res.json() else []
 
-# --- 3. UI: LOGIN & RESET PASSWORD ---
+# --- 3. UI: LOGIN & REGISTER ---
 if "user" not in st.session_state:
     st.markdown("<h1 style='text-align: center;'>Login to KarAI</h1>", unsafe_allow_html=True)
     tab1, tab2 = st.tabs(["🔒 Login / Daftar", "🔑 Lupa Password"])
@@ -69,14 +73,18 @@ if "user" not in st.session_state:
             data = get_user_data(email)
             if data:
                 if data.get('pw') == pw:
-                    st.session_state.user = {"email": email, "name": data.get('name', email.split('@')[0])}
+                    st.session_state.user = {
+                        "email": email, 
+                        "name": data.get('name', email.split('@')[0]),
+                        "premium": data.get('premium', False)
+                    }
                     st.rerun()
                 else: 
                     st.error("Password salah! Gunakan menu Lupa Password jika lupa.")
             else:
                 name_default = email.split('@')[0]
-                save_user(email, pw, name_default)
-                st.session_state.user = {"email": email, "name": name_default}
+                save_user(email, pw, name_default, False)
+                st.session_state.user = {"email": email, "name": name_default, "premium": False}
                 st.rerun()
 
     with tab2:
@@ -90,7 +98,7 @@ if "user" not in st.session_state:
             else:
                 data = get_user_data(email_reset)
                 if data: 
-                    save_user(email_reset, new_pw, data.get('name', email_reset.split('@')[0]))
+                    save_user(email_reset, new_pw, data.get('name', email_reset.split('@')[0]), data.get('premium', False))
                     st.success("Password berhasil diperbarui! Silakan Login.")
                 else: 
                     st.error("Email belum terdaftar.")
@@ -101,9 +109,10 @@ if "page" not in st.session_state: st.session_state.page = "chat"
 if "messages" not in st.session_state: st.session_state.messages = []
 if "chat_id" not in st.session_state: st.session_state.chat_id = str(uuid.uuid4())
 
-# --- 5. SIDEBAR (NAVIGASI & HISTORY) ---
+# --- 5. SIDEBAR (NAVIGASI, HISTORY, & MODEL OPTIONS) ---
 with st.sidebar:
-    st.markdown(f"### 👤 Halo, {st.session_state.user['name']}")
+    status_badge = "🌟 VIP" if st.session_state.user.get('premium', False) else "👤"
+    st.markdown(f"### {status_badge} Halo, {st.session_state.user['name']}")
     st.divider()
     
     if st.button("💬 Buka Chat", use_container_width=True): st.session_state.page = "chat"; st.rerun()
@@ -117,14 +126,20 @@ with st.sidebar:
             st.session_state.chat_id = str(uuid.uuid4())
             st.rerun()
         
-        # OPSI MODEL MURNI TEKS
+        # MODEL DEFAULT UNTUK PENGGUNA GRATIS
         models = [
-            "🚀 KGemini", 
-            "🧠 KGroq",
-            "🎨 KClaude",
-            "📞 KGPT"
+            "🚀 KBasic (Groq Llama 8B)", 
+            "🧠 KExpert (Groq Llama 70B)"
         ]
-        st.session_state.selected_model = st.selectbox("Pilih Mesin AI:", models)
+        
+        # MODEL TAMBAHAN JIKA STATUS PREMIUM AKTIF
+        if st.session_state.user.get('premium', False):
+            models.extend([
+                "🎨 KCreative (Image Generator)",
+                "🔮 KSmart (Groq DeepSeek R1)"
+            ])
+        
+        st.session_state.selected_model = st.selectbox("Pilih Model Engine:", models)
         
         st.divider()
         st.subheader("📜 Riwayat Chat")
@@ -154,27 +169,37 @@ if st.session_state.page == "settings":
     st.title("⚙️ Pengaturan Akun")
     st.write(f"**Email Terdaftar:** `{st.session_state.user['email']}`")
     new_name = st.text_input("Ubah Nama Panggilan Anda:", value=st.session_state.user['name'])
+    st.divider()
+    
+    st.subheader("🔑 Akses Fitur Premium")
+    secret_token = st.text_input("Masukkan Token Khusus Premium:", type="password")
     
     if st.button("💾 Simpan Perubahan"):
         curr_data = get_user_data(st.session_state.user['email'])
         pw_to_save = curr_data['pw'] if curr_data else "1234"
-        save_user(st.session_state.user['email'], pw_to_save, new_name)
+        is_premium = curr_data.get('premium', False) if curr_data else False
+        
+        if secret_token == "kontolodonmegalodonshark":
+            is_premium = True
+            st.success("🎉 Token Valid! Fitur KCreative dan KSmart (DeepSeek R1) berhasil dibuka.")
+        elif secret_token != "":
+            st.error("❌ Token rahasia salah.")
+            
+        save_user(st.session_state.user['email'], pw_to_save, new_name, is_premium)
         st.session_state.user['name'] = new_name
-        st.success("Nama berhasil diupdate! Silakan kembali ke menu 'Buka Chat'.")
+        st.session_state.user['premium'] = is_premium
+        st.success("Data akun berhasil diupdate! Silakan kembali ke menu 'Buka Chat'.")
 
 elif st.session_state.page == "chat":
     st.title("KarAI")
-    selected_model = st.session_state.get("selected_model", "🚀 KGemini")
+    selected_model = st.session_state.get("selected_model", "🚀 KBasic (Groq Llama 8B)")
     
-    # Render History Chat
+    # Tampilkan percakapan lama
     for m in st.session_state.messages:
         with st.chat_message(m["role"]): st.markdown(m["content"])
 
-    # Input murni teks untuk semua model
-    prompt = st.chat_input("Kirim pesan ke KarAI...")
-
-    # Proses AI
-    if prompt:
+    # Input murni teks
+    if prompt := st.chat_input("Kirim pesan ke KarAI..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
         
@@ -182,66 +207,47 @@ elif st.session_state.page == "chat":
             try:
                 ai_response = ""
                 
-                # --- JALUR 1: KGEMINI (GOOGLE) ---
-                if "KGemini" in selected_model:
-                    genai.configure(api_key=st.secrets.get("GOOGLE_API_KEY", ""))
-                    model = genai.GenerativeModel("gemini-1.5-flash")
-                    response = model.generate_content(prompt)
-                    ai_response = response.text
-
-                # --- JALUR 2: KGROQ (LLAMA 3) ---
-                elif "KGroq" in selected_model:
-                    if not groq_key: st.error("⚠️ API Key Groq Kosong!"); st.stop()
+                # --- MESIN 1: KCREATIVE (IMAGE GENERATOR GRATIS UNLIMITED) ---
+                if "KCreative" in selected_model:
+                    encoded_prompt = urllib.parse.quote(prompt)
+                    img_id = uuid.uuid4().int & 100000
+                    image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=512&height=512&seed={img_id}&nologo=true"
+                    ai_response = f"Berikut adalah hasil gambar untuk perintah: **{prompt}**\n\n![Generated Image]({image_url})"
+                
+                # --- MESIN 2: TEXT PROCESSING VIA GROQ (KBASIC, KEXPERT, KSMART) ---
+                else:
+                    if not groq_key:
+                        st.error("⚠️ API Key Groq belum dipasang di Secrets!")
+                        st.session_state.messages.pop()
+                        st.stop()
+                    
+                    # Tentukan Target Model berdasarkan pilihan engine
+                    if "KBasic" in selected_model:
+                        model_target = "llama-3.1-8b-instant"
+                    elif "KExpert" in selected_model:
+                        model_target = "llama-3.3-70b-versatile"
+                    elif "KSmart" in selected_model:
+                        model_target = "deepseek-r1-distill-llama-70b" # MODEL TINGGI DEEPSEEK DI GROQ
+                        
                     headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
                     payload = {
-                        "model": "llama-3.3-70b-versatile",
+                        "model": model_target,
                         "messages": [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
                     }
                     res = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
-                    if res.status_code == 200: ai_response = res.json()["choices"][0]["message"]["content"]
-                    else: st.error(f"Groq Error: {res.text}"); st.stop()
-
-                # --- JALUR 3: KCLAUDE (ANTHROPIC) ---
-                elif "KClaude" in selected_model:
-                    if not anthropic_key: st.error("⚠️ API Key Anthropic Kosong!"); st.stop()
-                    headers = {
-                        "x-api-key": anthropic_key,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json"
-                    }
                     
-                    # Konversi format role untuk Anthropic
-                    claude_msgs = []
-                    for m in st.session_state.messages:
-                        role = "assistant" if m["role"] == "assistant" else "user"
-                        claude_msgs.append({"role": role, "content": m["content"]})
-                        
-                    payload = {
-                        "model": "claude-3-haiku-20240307",
-                        "max_tokens": 1024,
-                        "messages": claude_msgs
-                    }
-                    res = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
-                    if res.status_code == 200: ai_response = res.json()["content"][0]["text"]
-                    else: st.error(f"Claude Error: {res.text}"); st.stop()
-
-                # --- JALUR 4: KGPT (OPENAI) ---
-                elif "KGPT" in selected_model:
-                    if not openai_key: st.error("⚠️ API Key OpenAI Kosong!"); st.stop()
-                    headers = {"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"}
-                    payload = {
-                        "model": "gpt-4o-mini",
-                        "messages": [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
-                    }
-                    res = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
-                    if res.status_code == 200: ai_response = res.json()["choices"][0]["message"]["content"]
-                    else: st.error(f"OpenAI Error: {res.text}"); st.stop()
+                    if res.status_code == 200:
+                        ai_response = res.json()["choices"][0]["message"]["content"]
+                    else:
+                        st.error(f"Groq API Error: {res.text}")
+                        st.session_state.messages.pop()
+                        st.stop()
                 
-                # --- OUTPUT BALASAN ---
+                # Tampilkan balasan AI
                 with st.chat_message("assistant"): st.markdown(ai_response)
                 st.session_state.messages.append({"role": "assistant", "content": ai_response})
-                save_chat(st.session_state.user['email'], st.session_state.messages, st.session_state.chat_id)
                 
+                save_chat(st.session_state.user['email'], st.session_state.messages, st.session_state.chat_id)
                 st.rerun()
                 
             except Exception as e:

@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import uuid
 import urllib.parse
-import re  # BARU: Untuk memfilter tag <think>
+import re
 
 # --- 1. SETUP & CSS (TEMA AMAN, CHAT KANAN-KIRI, & NO SPINNER ICON) ---
 st.set_page_config(page_title="KarAI OS", page_icon="🤖", layout="centered")
@@ -61,19 +61,15 @@ def get_chat_history(email):
 
 # --- 3. HELPER UNTUK RENDER PESAN AI (SEMBUNYIKAN <THINK>) ---
 def render_ai_message(text):
-    # Cari pola <think> ... </think> mengabaikan besar/kecil huruf
     match = re.search(r'<think>(.*?)</think>', text, flags=re.DOTALL | re.IGNORECASE)
     if match:
         think_text = match.group(1).strip()
-        # Buang bagian <think> dari teks utama
         main_text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE).strip()
         
-        # Tampilkan Proses Mikir di Expander yang bisa diklik (panah)
         if think_text:
             with st.expander("💭 Proses Berpikir..."):
                 st.markdown(f"*{think_text}*")
         
-        # Tampilkan jawaban asli
         st.markdown(main_text)
     else:
         st.markdown(text)
@@ -135,7 +131,7 @@ if "page" not in st.session_state: st.session_state.page = "chat"
 if "messages" not in st.session_state: st.session_state.messages = []
 if "chat_id" not in st.session_state: st.session_state.chat_id = str(uuid.uuid4())
 
-# --- 6. SIDEBAR (NAVIGASI, HISTORY, & MODEL OPTIONS YANG UDAH DIBERSIHIN) ---
+# --- 6. SIDEBAR (NAVIGASI, HISTORY, & MODEL OPTIONS) ---
 with st.sidebar:
     status_badge = "🌟 VIP" if st.session_state.user.get('premium', False) else "👤"
     st.markdown(f"### {status_badge} Halo, {st.session_state.user['name']}")
@@ -152,12 +148,12 @@ with st.sidebar:
             st.session_state.chat_id = str(uuid.uuid4())
             st.rerun()
         
-        # MODEL DEFAULT UNTUK PENGGUNA GRATIS (NAMA UDAH DISUNAT)
+        # MODEL DEFAULT
         models = ["🚀 KBasic", "🧠 KExpert"]
         
         # MODEL TAMBAHAN JIKA STATUS PREMIUM AKTIF
         if st.session_state.user.get('premium', False):
-            models.extend(["🎨 KCreative", "🔮 KSmart"])
+            models.extend(["🎨 KCreative", "🔮 KSmart", "👂 KListen"])
         
         st.session_state.selected_model = st.selectbox("Pilih Mesin AI:", models)
         
@@ -201,7 +197,7 @@ if st.session_state.page == "settings":
         
         if secret_token == "kontolodonmegalodonshark":
             is_premium = True
-            st.success("🎉 Token Valid! Fitur KCreative dan KSmart berhasil dibuka.")
+            st.success("🎉 Token Valid! Fitur Premium berhasil dibuka.")
         elif secret_token != "":
             st.error("❌ Token rahasia salah.")
             
@@ -214,7 +210,7 @@ elif st.session_state.page == "chat":
     st.title("KarAI")
     selected_model = st.session_state.get("selected_model", "🚀 KBasic")
     
-    # Tampilkan percakapan lama (dengan filter mikir)
+    # Tampilkan percakapan lama
     for m in st.session_state.messages:
         with st.chat_message(m["role"]): 
             if m["role"] == "assistant":
@@ -231,33 +227,52 @@ elif st.session_state.page == "chat":
             try:
                 ai_response = ""
                 
-                # --- MESIN 1: KCREATIVE (IMAGE GENERATOR GRATIS UNLIMITED) ---
+                # --- MESIN 1: KCREATIVE (IMAGE GENERATOR) ---
                 if "KCreative" in selected_model:
                     encoded_prompt = urllib.parse.quote(prompt)
                     img_id = uuid.uuid4().int & 100000
                     image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=512&height=512&seed={img_id}&nologo=true"
                     ai_response = f"Berikut adalah hasil gambar untuk perintah: **{prompt}**\n\n![Generated Image]({image_url})"
                 
-                # --- MESIN 2: TEXT PROCESSING VIA GROQ (KBASIC, KEXPERT, KSMART) ---
+                # --- MESIN 2: TEXT PROCESSING VIA GROQ ---
                 else:
                     if not groq_key:
                         st.error("⚠️ API Key Groq belum dipasang di Secrets!")
                         st.session_state.messages.pop()
                         st.stop()
                     
-                    # Tentukan Target Model berdasarkan nama singkat
+                    # Tentukan Target Model berdasarkan pilihan
                     if "KBasic" in selected_model:
                         model_target = "llama-3.1-8b-instant"
                     elif "KExpert" in selected_model:
                         model_target = "llama-3.3-70b-versatile"
                     elif "KSmart" in selected_model:
-                        model_target = "deepseek-r1-distill-llama-70b" # Atau qwen kalau deepseek lagi mati
+                        model_target = "mixtral-8x7b-32768" # DIGANTI KE MIXTRAL YANG STABIL & KUAT DI GROQ
+                    elif "KListen" in selected_model:
+                        model_target = "llama-3.3-70b-versatile" # Menggunakan Llama 3.3 karena pintar main roleplay
+                    else:
+                        model_target = "llama-3.1-8b-instant"
                         
                     headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
+                    
+                    # Bangun Payload Chat
+                    messages_payload = []
+                    
+                    # JIKA KLISTEN, SUNTIKKAN SYSTEM PROMPT EMOSIONAL DI AWAL
+                    if "KListen" in selected_model:
+                        messages_payload.append({
+                            "role": "system",
+                            "content": "Kamu adalah KListen, AI teman curhat. Aturan mutlak perilakumu: 1. Jika pengguna sedih, galau, atau curhat baik-baik, balaslah dengan sangat lembut, menenangkan, dan penuh empati. 2. JIKA pengguna ngegas, berkata kasar, toxic, atau maki-maki duluan, KAMU WAJIB MERESPON DENGAN SANGAT GALAK, NGEGAS, DAN MAKI-MAKI BALIK TANPA AMPUN. Jangan bersikap formal, gunakan bahasa gaul Indonesia sehari-hari (lu/gw, anjir, dll)."
+                        })
+                    
+                    # Masukkan history chat user
+                    messages_payload.extend([{"role": m["role"], "content": m["content"]} for m in st.session_state.messages])
+                    
                     payload = {
                         "model": model_target,
-                        "messages": [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
+                        "messages": messages_payload
                     }
+                    
                     res = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
                     
                     if res.status_code == 200:
@@ -267,7 +282,7 @@ elif st.session_state.page == "chat":
                         st.session_state.messages.pop()
                         st.stop()
                 
-                # Tampilkan balasan AI dengan fungsi helper (filter mikir)
+                # Tampilkan balasan AI
                 with st.chat_message("assistant"): 
                     render_ai_message(ai_response)
                 

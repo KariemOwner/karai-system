@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import uuid
 import urllib.parse
+import re  # BARU: Untuk memfilter tag <think>
 
 # --- 1. SETUP & CSS (TEMA AMAN, CHAT KANAN-KIRI, & NO SPINNER ICON) ---
 st.set_page_config(page_title="KarAI OS", page_icon="🤖", layout="centered")
@@ -24,13 +25,19 @@ st.markdown("""
     /* Hapus icon jam pasir/loading default Streamlit */
     [data-testid="stSpinner"] > div > div { display: none !important; }
     [data-testid="stSpinner"] { background-color: transparent !important; color: inherit !important; }
+    
+    /* Percantik Expander untuk Proses Mikir */
+    [data-testid="stExpander"] {
+        border: 1px dashed rgba(128,128,128,0.3) !important;
+        background-color: transparent !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 firebase_url = st.secrets.get("FIREBASE_DB_URL", "")
 groq_key = st.secrets.get("GROQ_API_KEY", "")
 
-# --- 2. DATABASE LOGIC (FIREBASE) ---
+# --- 2. LOGIKA DATABASE (FIREBASE) ---
 def get_user_data(email):
     if not firebase_url: return None
     res = requests.get(f"{firebase_url}/users/{email.replace('.', '_')}.json")
@@ -52,7 +59,26 @@ def get_chat_history(email):
     res = requests.get(url)
     return list(res.json().keys()) if res.status_code == 200 and res.json() else []
 
-# --- 3. UI: LOGIN & REGISTER ---
+# --- 3. HELPER UNTUK RENDER PESAN AI (SEMBUNYIKAN <THINK>) ---
+def render_ai_message(text):
+    # Cari pola <think> ... </think> mengabaikan besar/kecil huruf
+    match = re.search(r'<think>(.*?)</think>', text, flags=re.DOTALL | re.IGNORECASE)
+    if match:
+        think_text = match.group(1).strip()
+        # Buang bagian <think> dari teks utama
+        main_text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE).strip()
+        
+        # Tampilkan Proses Mikir di Expander yang bisa diklik (panah)
+        if think_text:
+            with st.expander("💭 Proses Berpikir..."):
+                st.markdown(f"*{think_text}*")
+        
+        # Tampilkan jawaban asli
+        st.markdown(main_text)
+    else:
+        st.markdown(text)
+
+# --- 4. UI: LOGIN & REGISTER ---
 if "user" not in st.session_state:
     st.markdown("<h1 style='text-align: center;'>Login to KarAI</h1>", unsafe_allow_html=True)
     tab1, tab2 = st.tabs(["🔒 Login / Daftar", "🔑 Lupa Password"])
@@ -104,12 +130,12 @@ if "user" not in st.session_state:
                     st.error("Email belum terdaftar.")
     st.stop()
 
-# --- 4. SESSION INITIALIZATION ---
+# --- 5. INISIALISASI SESI ---
 if "page" not in st.session_state: st.session_state.page = "chat"
 if "messages" not in st.session_state: st.session_state.messages = []
 if "chat_id" not in st.session_state: st.session_state.chat_id = str(uuid.uuid4())
 
-# --- 5. SIDEBAR (NAVIGASI, HISTORY, & MODEL OPTIONS) ---
+# --- 6. SIDEBAR (NAVIGASI, HISTORY, & MODEL OPTIONS YANG UDAH DIBERSIHIN) ---
 with st.sidebar:
     status_badge = "🌟 VIP" if st.session_state.user.get('premium', False) else "👤"
     st.markdown(f"### {status_badge} Halo, {st.session_state.user['name']}")
@@ -126,20 +152,14 @@ with st.sidebar:
             st.session_state.chat_id = str(uuid.uuid4())
             st.rerun()
         
-        # MODEL DEFAULT UNTUK PENGGUNA GRATIS
-        models = [
-            "🚀 KBasic (Groq Llama 8B)", 
-            "🧠 KExpert (Groq Llama 70B)"
-        ]
+        # MODEL DEFAULT UNTUK PENGGUNA GRATIS (NAMA UDAH DISUNAT)
+        models = ["🚀 KBasic", "🧠 KExpert"]
         
         # MODEL TAMBAHAN JIKA STATUS PREMIUM AKTIF
         if st.session_state.user.get('premium', False):
-            models.extend([
-                "🎨 KCreative (Image Generator)",
-                "🔮 KSmart (Groq Qwen 3 32B)"
-            ])
+            models.extend(["🎨 KCreative", "🔮 KSmart"])
         
-        st.session_state.selected_model = st.selectbox("Pilih Model Engine:", models)
+        st.session_state.selected_model = st.selectbox("Pilih Mesin AI:", models)
         
         st.divider()
         st.subheader("📜 Riwayat Chat")
@@ -164,7 +184,7 @@ with st.sidebar:
         for key in list(st.session_state.keys()): del st.session_state[key]
         st.rerun()
 
-# --- 6. PAGES ROUTING ---
+# --- 7. PAGES ROUTING ---
 if st.session_state.page == "settings":
     st.title("⚙️ Pengaturan Akun")
     st.write(f"**Email Terdaftar:** `{st.session_state.user['email']}`")
@@ -192,11 +212,15 @@ if st.session_state.page == "settings":
 
 elif st.session_state.page == "chat":
     st.title("KarAI")
-    selected_model = st.session_state.get("selected_model", "🚀 KBasic (Groq Llama 8B)")
+    selected_model = st.session_state.get("selected_model", "🚀 KBasic")
     
-    # Tampilkan percakapan lama
+    # Tampilkan percakapan lama (dengan filter mikir)
     for m in st.session_state.messages:
-        with st.chat_message(m["role"]): st.markdown(m["content"])
+        with st.chat_message(m["role"]): 
+            if m["role"] == "assistant":
+                render_ai_message(m["content"])
+            else:
+                st.markdown(m["content"])
 
     # Input murni teks
     if prompt := st.chat_input("Kirim pesan ke KarAI..."):
@@ -221,13 +245,13 @@ elif st.session_state.page == "chat":
                         st.session_state.messages.pop()
                         st.stop()
                     
-                    # Tentukan Target Model berdasarkan pilihan engine
+                    # Tentukan Target Model berdasarkan nama singkat
                     if "KBasic" in selected_model:
                         model_target = "llama-3.1-8b-instant"
                     elif "KExpert" in selected_model:
                         model_target = "llama-3.3-70b-versatile"
                     elif "KSmart" in selected_model:
-                        model_target = "qwen/qwen3-32b" # GANTI KE QWEN3-32B KARENA DEEPSEEK DIHAPUS GROQ
+                        model_target = "deepseek-r1-distill-llama-70b" # Atau qwen kalau deepseek lagi mati
                         
                     headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
                     payload = {
@@ -243,10 +267,11 @@ elif st.session_state.page == "chat":
                         st.session_state.messages.pop()
                         st.stop()
                 
-                # Tampilkan balasan AI
-                with st.chat_message("assistant"): st.markdown(ai_response)
-                st.session_state.messages.append({"role": "assistant", "content": ai_response})
+                # Tampilkan balasan AI dengan fungsi helper (filter mikir)
+                with st.chat_message("assistant"): 
+                    render_ai_message(ai_response)
                 
+                st.session_state.messages.append({"role": "assistant", "content": ai_response})
                 save_chat(st.session_state.user['email'], st.session_state.messages, st.session_state.chat_id)
                 st.rerun()
                 

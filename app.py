@@ -136,7 +136,7 @@ with st.sidebar:
         if st.session_state.user.get('premium', False):
             models.extend([
                 "🎨 KCreative (Image Generator)",
-                "🔮 KSmart (Groq DeepSeek R1)"
+                "🔮 KSmart (Groq Qwen 3 32B)"
             ])
         
         st.session_state.selected_model = st.selectbox("Pilih Model Engine:", models)
@@ -181,7 +181,7 @@ if st.session_state.page == "settings":
         
         if secret_token == "kontolodonmegalodonshark":
             is_premium = True
-            st.success("🎉 Token Valid! Fitur KCreative dan KSmart (DeepSeek R1) berhasil dibuka.")
+            st.success("🎉 Token Valid! Fitur KCreative dan KSmart berhasil dibuka.")
         elif secret_token != "":
             st.error("❌ Token rahasia salah.")
             
@@ -227,7 +227,7 @@ elif st.session_state.page == "chat":
                     elif "KExpert" in selected_model:
                         model_target = "llama-3.3-70b-versatile"
                     elif "KSmart" in selected_model:
-                        model_target = "deepseek-r1-distill-llama-70b" # MODEL TINGGI DEEPSEEK DI GROQ
+                        model_target = "qwen/qwen3-32b" # GANTI KE QWEN3-32B KARENA DEEPSEEK DIHAPUS GROQ
                         
                     headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
                     payload = {

@@ -3,6 +3,7 @@ import requests
 import uuid
 import urllib.parse
 import re
+import base64
 
 # --- 1. SETUP & CSS (TEMA AMAN, CHAT KANAN-KIRI, & NO SPINNER ICON) ---
 st.set_page_config(page_title="KarAI OS", page_icon="🤖", layout="centered")
@@ -130,6 +131,7 @@ if "user" not in st.session_state:
 if "page" not in st.session_state: st.session_state.page = "chat"
 if "messages" not in st.session_state: st.session_state.messages = []
 if "chat_id" not in st.session_state: st.session_state.chat_id = str(uuid.uuid4())
+if "uploader_key" not in st.session_state: st.session_state.uploader_key = str(uuid.uuid4())
 
 # --- 6. SIDEBAR (NAVIGASI, HISTORY, & MODEL OPTIONS) ---
 with st.sidebar:
@@ -148,15 +150,21 @@ with st.sidebar:
             st.session_state.chat_id = str(uuid.uuid4())
             st.rerun()
         
-        # MODEL DEFAULT
-        models = ["🚀 KBasic", "🧠 KExpert"]
+        # MODEL DEFAULT (KLISTEN SEKARANG GRATIS)
+        models = ["🚀 KBasic", "🧠 KExpert", "👂 KListen"]
         
         # MODEL TAMBAHAN JIKA STATUS PREMIUM AKTIF
         if st.session_state.user.get('premium', False):
-            models.extend(["🎨 KCreative", "🔮 KSmart", "👂 KListen"])
+            models.extend(["🎨 KCreative", "🔮 KSmart"])
         
         st.session_state.selected_model = st.selectbox("Pilih Mesin AI:", models)
         
+        # FITUR UPLOAD GAMBAR KHUSUS BUAT KSMART
+        if "KSmart" in st.session_state.selected_model:
+            uploaded_file = st.file_uploader("Upload Foto (Khusus KSmart):", type=['png', 'jpg', 'jpeg'], key=st.session_state.uploader_key)
+        else:
+            uploaded_file = None
+            
         st.divider()
         st.subheader("📜 Riwayat Chat")
         history = get_chat_history(st.session_state.user['email'])
@@ -197,7 +205,7 @@ if st.session_state.page == "settings":
         
         if secret_token == "kontolodonmegalodonshark":
             is_premium = True
-            st.success("🎉 Token Valid! Fitur Premium berhasil dibuka.")
+            st.success("🎉 Token Valid! Fitur KCreative dan KSmart berhasil dibuka.")
         elif secret_token != "":
             st.error("❌ Token rahasia salah.")
             
@@ -215,13 +223,21 @@ elif st.session_state.page == "chat":
         with st.chat_message(m["role"]): 
             if m["role"] == "assistant":
                 render_ai_message(m["content"])
+            elif "image_url" in m["content"]:
+                st.markdown("📷 *[Gambar terkirim]*")
             else:
                 st.markdown(m["content"])
 
     # Input murni teks
     if prompt := st.chat_input("Kirim pesan ke KarAI..."):
+        # Tampilkan prompt user di layar
+        with st.chat_message("user"): 
+            st.markdown(prompt)
+            if 'uploaded_file' in locals() and uploaded_file:
+                st.image(uploaded_file, width=200)
+
+        # Simpan ke session_state history (hanya teksnya saja agar rapi)
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"): st.markdown(prompt)
         
         with st.spinner("⏳ KarAI sedang berfikir..."):
             try:
@@ -234,22 +250,22 @@ elif st.session_state.page == "chat":
                     image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=512&height=512&seed={img_id}&nologo=true"
                     ai_response = f"Berikut adalah hasil gambar untuk perintah: **{prompt}**\n\n![Generated Image]({image_url})"
                 
-                # --- MESIN 2: TEXT PROCESSING VIA GROQ ---
+                # --- MESIN 2: TEXT & VISION PROCESSING VIA GROQ ---
                 else:
                     if not groq_key:
                         st.error("⚠️ API Key Groq belum dipasang di Secrets!")
                         st.session_state.messages.pop()
                         st.stop()
                     
-                    # Tentukan Target Model berdasarkan pilihan
+                    # Tentukan Target Model
                     if "KBasic" in selected_model:
                         model_target = "llama-3.1-8b-instant"
                     elif "KExpert" in selected_model:
                         model_target = "llama-3.3-70b-versatile"
                     elif "KSmart" in selected_model:
-                        model_target = "openai/gpt-oss-120b" # GANTI KE MODEL TERKUAT DAN PALING STABIL (GPT-OSS-120B)
+                        model_target = "llama-3.2-90b-vision-preview" # MODEL VISION PALING OP DI GROQ
                     elif "KListen" in selected_model:
-                        model_target = "llama-3.3-70b-versatile" # Sangat jago main roleplay dan nangkep emosi
+                        model_target = "llama-3.3-70b-versatile" 
                     else:
                         model_target = "llama-3.1-8b-instant"
                         
@@ -258,15 +274,30 @@ elif st.session_state.page == "chat":
                     # Bangun Payload Chat
                     messages_payload = []
                     
-                    # JIKA KLISTEN, SUNTIKKAN SYSTEM PROMPT EMOSIONAL DI AWAL
+                    # SYSTEM PROMPT BUAT KLISTEN
                     if "KListen" in selected_model:
                         messages_payload.append({
                             "role": "system",
                             "content": "Kamu adalah KListen, AI teman curhat. Aturan mutlak perilakumu: 1. Jika pengguna bersedih, galau, atau curhat baik-baik, balaslah dengan sangat lembut, menenangkan, dan penuh empati layaknya sahabat. 2. JIKA pengguna ngegas, berkata kasar, toxic, atau maki-maki duluan, KAMU WAJIB MERESPON DENGAN SANGAT GALAK, NGEGAS, DAN MAKI-MAKI BALIK TANPA AMPUN. Jangan bersikap kaku atau formal, gunakan bahasa gaul Indonesia sehari-hari (lu/gw, anjir, astaga, dll)."
                         })
                     
-                    # Masukkan history chat user
-                    messages_payload.extend([{"role": m["role"], "content": m["content"]} for m in st.session_state.messages])
+                    # Mapping History ke Payload API
+                    for i, m in enumerate(st.session_state.messages):
+                        # Khusus untuk KSMART: Kalau ini chat terakhir dan ada gambar di-upload
+                        if i == len(st.session_state.messages) - 1 and "KSmart" in selected_model and uploaded_file:
+                            base64_image = base64.b64encode(uploaded_file.getvalue()).decode('utf-8')
+                            image_url = f"data:image/jpeg;base64,{base64_image}"
+                            
+                            messages_payload.append({
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": m["content"]},
+                                    {"type": "image_url", "image_url": {"url": image_url}}
+                                ]
+                            })
+                        else:
+                            # Teks biasa untuk chat history sebelumnya / model lain
+                            messages_payload.append({"role": m["role"], "content": m["content"]})
                     
                     payload = {
                         "model": model_target,
@@ -288,6 +319,7 @@ elif st.session_state.page == "chat":
                 
                 st.session_state.messages.append({"role": "assistant", "content": ai_response})
                 save_chat(st.session_state.user['email'], st.session_state.messages, st.session_state.chat_id)
+                st.session_state.uploader_key = str(uuid.uuid4())
                 st.rerun()
                 
             except Exception as e:

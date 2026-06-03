@@ -4,6 +4,21 @@ import uuid
 import urllib.parse
 import re
 import base64
+import io
+
+# Library opsional — pastikan ada di requirements.txt
+try:
+    import pdfplumber
+    PDF_OK = True
+except ImportError:
+    PDF_OK = False
+
+try:
+    from docx import Document as DocxDoc
+    from docx.shared import Pt, RGBColor
+    DOCX_OK = True
+except ImportError:
+    DOCX_OK = False
 
 # ============================================================
 # 1. SETUP & CSS
@@ -13,18 +28,14 @@ st.set_page_config(page_title="KarAI OS", page_icon="🤖", layout="centered")
 st.markdown("""
 <style>
     .stChatMessage { padding: 10px; border-radius: 10px; margin-bottom: 15px; }
-
     [data-testid="stChatMessageUser"] {
         background-color: rgba(33, 150, 243, 0.1);
         flex-direction: row-reverse;
     }
     [data-testid="stChatMessageUser"] > div { text-align: right; }
-
     [data-testid="stChatMessageAvatar"] { display: none; }
-
     [data-testid="stSpinner"] > div > div { display: none !important; }
     [data-testid="stSpinner"] { background-color: transparent !important; color: inherit !important; }
-
     [data-testid="stExpander"] {
         border: 1px dashed rgba(128,128,128,0.3) !important;
         background-color: transparent !important;
@@ -33,16 +44,15 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================
-# 2. LOAD API KEYS DARI SECRETS
+# 2. LOAD API KEYS
 # ============================================================
 firebase_url  = st.secrets.get("FIREBASE_DB_URL",  "")
-groq_key      = st.secrets.get("GROQ_API_KEY",      "")   # masih dipake buat KSmart vision
-cerebras_key  = st.secrets.get("CEREBRAS_API_KEY",  "")   # daftar di inference.cerebras.ai
-sambanova_key = st.secrets.get("SAMBANOVA_API_KEY", "")   # daftar di cloud.sambanova.ai
+groq_key      = st.secrets.get("GROQ_API_KEY",      "")
+cerebras_key  = st.secrets.get("CEREBRAS_API_KEY",  "")
+sambanova_key = st.secrets.get("SAMBANOVA_API_KEY", "")
 
 # ============================================================
 # 3. KONFIGURASI MULTI-PROVIDER FALLBACK
-#    Urutan: Cerebras (1 juta token/hari) → SambaNova → Groq
 # ============================================================
 PROVIDERS = [
     {
@@ -83,6 +93,23 @@ PROVIDERS = [
     },
 ]
 
+# Tipe file yang didukung
+IMAGE_TYPES = {"png", "jpg", "jpeg"}
+DOC_TYPES   = {"pdf", "docx", "txt", "py", "js", "ts", "jsx", "md", "json", "csv", "html", "css"}
+ALL_TYPES   = sorted(IMAGE_TYPES | DOC_TYPES)
+
+# Keyword untuk deteksi permintaan generate file
+WORD_KW = [
+    "file word", "dokumen word", "bikin docx", "buat docx", "buat word",
+    "generate word", "buat laporan", "buat dokumen", "word document",
+    "download word", "simpan word", "format word", "dalam word",
+]
+CODE_KW = [
+    "file python", "script python", "file .py", "download python", "simpan python",
+    "file kode", "python file", "save python", "buat script", "simpan script",
+    "download code", "file js", "simpan js",
+]
+
 # ============================================================
 # 4. FUNGSI DATABASE (FIREBASE)
 # ============================================================
@@ -103,8 +130,13 @@ def save_user(email, password, name, is_premium=False):
 def save_chat(email, msgs, cid):
     if not firebase_url or not email:
         return
-    url = f"{firebase_url}/chats/{email.replace('.', '_')}/{cid}.json"
-    requests.put(url, json=[{"role": m["role"], "content": m["content"]} for m in msgs])
+    # Simpan hanya field yang aman di-JSON (bukan bytes)
+    clean = [{"role": m["role"], "content": m["content"],
+              "dl_key": m.get("dl_key")} for m in msgs]
+    requests.put(
+        f"{firebase_url}/chats/{email.replace('.', '_')}/{cid}.json",
+        json=clean
+    )
 
 def get_chat_history(email):
     if not firebase_url or not email:
@@ -114,10 +146,119 @@ def get_chat_history(email):
     return list(res.json().keys()) if res.status_code == 200 and res.json() else []
 
 # ============================================================
-# 5. FUNGSI AI: MULTI-PROVIDER FALLBACK
+# 5. FUNGSI BACA FILE
+# ============================================================
+def get_file_ext(filename):
+    return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+def extract_file_content(uploaded_file, max_chars=10000):
+    """Ekstrak teks dari file yang diupload. Return string siap dikirim ke AI."""
+    name = uploaded_file.name
+    ext  = get_file_ext(name)
+
+    try:
+        if ext == "pdf":
+            if not PDF_OK:
+                return f"[ERROR: pdfplumber belum terinstall. Tambahkan 'pdfplumber' ke requirements.txt]"
+            pages = []
+            with pdfplumber.open(io.BytesIO(uploaded_file.getvalue())) as pdf:
+                for page in pdf.pages:
+                    t = page.extract_text()
+                    if t:
+                        pages.append(t)
+            text = "\n\n".join(pages)
+
+        elif ext == "docx":
+            if not DOCX_OK:
+                return f"[ERROR: python-docx belum terinstall. Tambahkan 'python-docx' ke requirements.txt]"
+            doc  = DocxDoc(io.BytesIO(uploaded_file.getvalue()))
+            text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+
+        elif ext in DOC_TYPES:
+            text = uploaded_file.getvalue().decode("utf-8", errors="ignore")
+
+        else:
+            return f"[Format file '.{ext}' belum didukung untuk dibaca]"
+
+        if not text.strip():
+            return f"[File '{name}' tidak mengandung teks yang bisa dibaca]"
+
+        if len(text) > max_chars:
+            text = text[:max_chars] + f"\n\n[... dipotong. File asli {len(text)} karakter]"
+
+        return f"=== Isi file: '{name}' ===\n{text}\n=== Akhir file ==="
+
+    except Exception as e:
+        return f"[Gagal membaca file '{name}': {e}]"
+
+# ============================================================
+# 6. FUNGSI GENERATE FILE (WORD & PYTHON)
+# ============================================================
+def create_word_doc(content, title="Output KarAI"):
+    """Konversi teks AI response → file .docx siap download."""
+    if not DOCX_OK:
+        return None
+
+    doc   = DocxDoc()
+    doc.add_heading(title, level=0)
+    lines = content.split("\n")
+    in_code = False
+
+    for line in lines:
+        # Toggle code block
+        if line.strip().startswith("```"):
+            in_code = not in_code
+            continue
+
+        if in_code:
+            p = doc.add_paragraph(line)
+            for run in p.runs:
+                run.font.name = "Courier New"
+                run.font.size = Pt(10)
+            continue
+
+        if line.startswith("### "):
+            doc.add_heading(line[4:].strip(), level=3)
+        elif line.startswith("## "):
+            doc.add_heading(line[3:].strip(), level=2)
+        elif line.startswith("# "):
+            doc.add_heading(line[2:].strip(), level=1)
+        elif line.startswith(("- ", "* ")):
+            doc.add_paragraph(line[2:].strip(), style="List Bullet")
+        elif re.match(r"^\d+\. ", line):
+            doc.add_paragraph(re.sub(r"^\d+\. ", "", line).strip(), style="List Number")
+        elif line.strip() == "":
+            doc.add_paragraph()
+        else:
+            # Bersihkan markdown inline
+            clean = re.sub(r"\*\*(.*?)\*\*", r"\1", line)
+            clean = re.sub(r"\*(.*?)\*",     r"\1", clean)
+            clean = re.sub(r"`(.*?)`",        r"\1", clean)
+            doc.add_paragraph(clean)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf
+
+def extract_code_block(text):
+    """Ambil kode pertama dari blok ```...``` dalam teks AI."""
+    match = re.search(r"```(?:\w+)?\n?(.*?)```", text, re.DOTALL)
+    return match.group(1).strip() if match else None
+
+def has_code_block(text):
+    return bool(re.search(r"```", text))
+
+def wants_word(prompt):
+    return any(k in prompt.lower() for k in WORD_KW)
+
+def wants_code_file(prompt):
+    return any(k in prompt.lower() for k in CODE_KW)
+
+# ============================================================
+# 7. FUNGSI AI: MULTI-PROVIDER FALLBACK
 # ============================================================
 def detect_mode(selected_model_str):
-    """Mapping nama model di UI → key mode untuk PROVIDERS."""
     if "KBasic"  in selected_model_str: return "basic"
     if "KExpert" in selected_model_str: return "expert"
     if "KListen" in selected_model_str: return "listen"
@@ -126,16 +267,15 @@ def detect_mode(selected_model_str):
 
 def call_ai_fallback(messages_payload, selected_model_str):
     """
-    Coba Cerebras dulu (1 juta token/hari gratis, ultra cepat),
-    lalu SambaNova, lalu Groq sebagai last resort.
-    Kalau kena 429 rate limit atau timeout → otomatis pindah ke provider berikutnya.
+    Coba Cerebras → SambaNova → Groq secara berurutan.
+    Pindah provider otomatis kalau kena 429 atau timeout.
     """
     mode_key = detect_mode(selected_model_str)
     tried    = []
 
     for p in PROVIDERS:
         if not p["key"]:
-            continue  # skip provider yang keynya kosong / belum diisi
+            continue
 
         model_name = p["models"].get(mode_key, p["models"]["default"])
         tried.append(p["name"])
@@ -145,45 +285,41 @@ def call_ai_fallback(messages_payload, selected_model_str):
                 "Authorization": f"Bearer {p['key']}",
                 "Content-Type":  "application/json",
             }
-            payload = {
-                "model":    model_name,
-                "messages": messages_payload,
-            }
-            res = requests.post(p["url"], headers=headers, json=payload, timeout=30)
+            res = requests.post(
+                p["url"],
+                headers=headers,
+                json={"model": model_name, "messages": messages_payload},
+                timeout=30,
+            )
 
             if res.status_code == 200:
                 st.caption(f"✅ Dijawab oleh: **{p['name']}** ({model_name})")
                 return res.json()["choices"][0]["message"]["content"]
-
             elif res.status_code == 429:
-                # Rate limit → coba provider berikutnya
-                st.toast(f"⚠️ {p['name']} lagi penuh, pindah ke cadangan...", icon="🔄")
+                st.toast(f"⚠️ {p['name']} penuh, pindah ke cadangan...", icon="🔄")
                 continue
-
             else:
-                # Error lain → tetap lanjut ke provider berikutnya
                 continue
 
         except requests.exceptions.Timeout:
-            st.toast(f"⏱️ {p['name']} timeout, coba yang lain...", icon="🔄")
+            st.toast(f"⏱️ {p['name']} timeout, coba lain...", icon="🔄")
             continue
         except Exception:
             continue
 
-    # Kalau semua provider gagal
     return (
-        f"❌ Semua server AI lagi sibuk (sudah dicoba: {', '.join(tried)}). "
-        "Tunggu sebentar lalu coba lagi ya!"
+        f"❌ Semua server AI lagi sibuk (dicoba: {', '.join(tried)}). "
+        "Coba lagi dalam beberapa menit ya!"
     )
 
 # ============================================================
-# 6. HELPER: RENDER PESAN AI (SEMBUNYIKAN TAG <think>)
+# 8. HELPER RENDER PESAN (SEMBUNYIKAN <think>)
 # ============================================================
 def render_ai_message(text):
-    match = re.search(r'<think>(.*?)</think>', text, flags=re.DOTALL | re.IGNORECASE)
+    match = re.search(r"<think>(.*?)</think>", text, flags=re.DOTALL | re.IGNORECASE)
     if match:
         think_text = match.group(1).strip()
-        main_text  = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE).strip()
+        main_text  = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
         if think_text:
             with st.expander("💭 Proses Berpikir..."):
                 st.markdown(f"*{think_text}*")
@@ -192,7 +328,7 @@ def render_ai_message(text):
         st.markdown(text)
 
 # ============================================================
-# 7. UI: LOGIN & REGISTER
+# 9. UI: LOGIN & REGISTER
 # ============================================================
 if "user" not in st.session_state:
     st.markdown("<h1 style='text-align: center;'>Login to KarAI</h1>", unsafe_allow_html=True)
@@ -254,15 +390,16 @@ if "user" not in st.session_state:
     st.stop()
 
 # ============================================================
-# 8. INISIALISASI SESSION STATE
+# 10. INISIALISASI SESSION STATE
 # ============================================================
 if "page"         not in st.session_state: st.session_state.page         = "chat"
 if "messages"     not in st.session_state: st.session_state.messages     = []
 if "chat_id"      not in st.session_state: st.session_state.chat_id      = str(uuid.uuid4())
 if "uploader_key" not in st.session_state: st.session_state.uploader_key = str(uuid.uuid4())
+if "downloads"    not in st.session_state: st.session_state.downloads    = {}
 
 # ============================================================
-# 9. SIDEBAR
+# 11. SIDEBAR
 # ============================================================
 with st.sidebar:
     status_badge = "🌟 VIP" if st.session_state.user.get("premium", False) else "👤"
@@ -270,11 +407,9 @@ with st.sidebar:
     st.divider()
 
     if st.button("💬 Buka Chat",        use_container_width=True):
-        st.session_state.page = "chat"
-        st.rerun()
+        st.session_state.page = "chat"; st.rerun()
     if st.button("⚙️ Pengaturan Akun", use_container_width=True):
-        st.session_state.page = "settings"
-        st.rerun()
+        st.session_state.page = "settings"; st.rerun()
 
     st.divider()
 
@@ -284,20 +419,20 @@ with st.sidebar:
             st.session_state.chat_id  = str(uuid.uuid4())
             st.rerun()
 
-        # Model gratis
         models = ["🚀 KBasic", "🧠 KExpert", "👂 KListen"]
-        # Tambahan kalau premium
         if st.session_state.user.get("premium", False):
             models.extend(["🎨 KCreative", "🔮 KSmart"])
 
         st.session_state.selected_model = st.selectbox("Pilih Mesin AI:", models)
 
-        # Upload gambar hanya muncul kalau KSmart
+        # File uploader — hanya muncul di KSmart
+        # Gambar → vision | PDF/DOCX/kode → dibaca sebagai teks
         if "KSmart" in st.session_state.selected_model:
+            st.caption("📎 Gambar, PDF, DOCX, atau file kode")
             uploaded_file = st.file_uploader(
-                "Upload Foto (Khusus KSmart):",
-                type=["png", "jpg", "jpeg"],
-                key=st.session_state.uploader_key
+                "Upload File:",
+                type=ALL_TYPES,
+                key=st.session_state.uploader_key,
             )
         else:
             uploaded_file = None
@@ -330,12 +465,12 @@ with st.sidebar:
         st.rerun()
 
 # ============================================================
-# 10. HALAMAN: PENGATURAN AKUN
+# 12. HALAMAN: PENGATURAN AKUN
 # ============================================================
 if st.session_state.page == "settings":
     st.title("⚙️ Pengaturan Akun")
     st.write(f"**Email Terdaftar:** `{st.session_state.user['email']}`")
-    new_name = st.text_input("Ubah Nama Panggilan Anda:", value=st.session_state.user["name"])
+    new_name = st.text_input("Ubah Nama Panggilan:", value=st.session_state.user["name"])
     st.divider()
 
     st.subheader("🔑 Akses Fitur Premium")
@@ -355,82 +490,98 @@ if st.session_state.page == "settings":
         save_user(st.session_state.user["email"], pw_to_save, new_name, is_premium)
         st.session_state.user["name"]    = new_name
         st.session_state.user["premium"] = is_premium
-        st.success("Data akun berhasil diupdate! Silakan kembali ke menu 'Buka Chat'.")
+        st.success("Data akun berhasil diupdate!")
 
 # ============================================================
-# 11. HALAMAN: CHAT UTAMA
+# 13. HALAMAN: CHAT UTAMA
 # ============================================================
 elif st.session_state.page == "chat":
     st.title("KarAI")
     selected_model = st.session_state.get("selected_model", "🚀 KBasic")
 
-    # Tampilkan history percakapan
+    # --- Render history percakapan ---
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
             if m["role"] == "assistant":
                 render_ai_message(m["content"])
-            elif "image_url" in m["content"]:
-                st.markdown("📷 *[Gambar terkirim]*")
+
+                # Tampilkan tombol download jika ada (dari session state)
+                dl_key = m.get("dl_key")
+                if dl_key and dl_key in st.session_state.downloads:
+                    dl = st.session_state.downloads[dl_key]
+                    st.download_button(
+                        label     = dl["label"],
+                        data      = dl["data"],
+                        file_name = dl["filename"],
+                        mime      = dl["mime"],
+                        key       = f"dlbtn_{dl_key}",
+                    )
             else:
                 st.markdown(m["content"])
 
-    # Input user
+    # --- Input user ---
     if prompt := st.chat_input("Kirim pesan ke KarAI..."):
 
         # Tampilkan pesan user di layar
         with st.chat_message("user"):
             st.markdown(prompt)
             if uploaded_file:
-                st.image(uploaded_file, width=200)
+                ext = get_file_ext(uploaded_file.name)
+                if ext in IMAGE_TYPES:
+                    st.image(uploaded_file, width=200)
+                else:
+                    st.caption(f"📎 {uploaded_file.name}")
 
-        # Simpan ke history (teks saja)
-        st.session_state.messages.append({"role": "user", "content": prompt})
+        # Simpan ke history (teks + nama file kalau ada)
+        display_content = prompt
+        if uploaded_file and get_file_ext(uploaded_file.name) not in IMAGE_TYPES:
+            display_content = f"📎 *[File: {uploaded_file.name}]*\n\n{prompt}"
+        st.session_state.messages.append({"role": "user", "content": display_content})
 
         with st.spinner("⏳ KarAI sedang berpikir..."):
             try:
                 ai_response = ""
+                dl_key      = None   # key untuk tombol download (jika ada)
 
-                # --------------------------------------------------
-                # MESIN 1: KCREATIVE → generate gambar via Pollinations
-                # --------------------------------------------------
+                # ------------------------------------------------
+                # MESIN 1: KCREATIVE → generate gambar (Pollinations)
+                # ------------------------------------------------
                 if "KCreative" in selected_model:
-                    encoded_prompt = urllib.parse.quote(prompt)
-                    img_id         = uuid.uuid4().int & 100000
-                    image_url      = (
-                        f"https://image.pollinations.ai/prompt/{encoded_prompt}"
+                    encoded = urllib.parse.quote(prompt)
+                    img_id  = uuid.uuid4().int & 100000
+                    img_url = (
+                        f"https://image.pollinations.ai/prompt/{encoded}"
                         f"?width=512&height=512&seed={img_id}&nologo=true"
                     )
                     ai_response = (
-                        f"Berikut adalah hasil gambar untuk perintah: **{prompt}**\n\n"
-                        f"![Generated Image]({image_url})"
+                        f"Berikut gambar untuk: **{prompt}**\n\n"
+                        f"![Generated Image]({img_url})"
                     )
 
-                # --------------------------------------------------
-                # MESIN 2: KSMART + FOTO → Groq Vision (satu-satunya
-                #          provider yang support image input gratis)
-                # --------------------------------------------------
-                elif "KSmart" in selected_model and uploaded_file:
+                # ------------------------------------------------
+                # MESIN 2: KSMART + GAMBAR → Groq Vision
+                # ------------------------------------------------
+                elif "KSmart" in selected_model and uploaded_file and get_file_ext(uploaded_file.name) in IMAGE_TYPES:
                     if not groq_key:
-                        st.error("⚠️ GROQ_API_KEY belum diisi di Secrets! KSmart + foto butuh Groq.")
+                        st.error("⚠️ GROQ_API_KEY belum diisi! KSmart + foto butuh Groq.")
                         st.session_state.messages.pop()
                         st.stop()
 
-                    base64_image   = base64.b64encode(uploaded_file.getvalue()).decode("utf-8")
-                    image_url_data = f"data:image/jpeg;base64,{base64_image}"
+                    b64     = base64.b64encode(uploaded_file.getvalue()).decode("utf-8")
+                    img_b64 = f"data:image/jpeg;base64,{b64}"
 
-                    messages_payload = []
+                    msg_vision = []
                     for i, m in enumerate(st.session_state.messages):
                         if i == len(st.session_state.messages) - 1:
-                            # Pesan terakhir (yang baru): sertakan gambar
-                            messages_payload.append({
+                            msg_vision.append({
                                 "role": "user",
                                 "content": [
                                     {"type": "text",      "text": m["content"]},
-                                    {"type": "image_url", "image_url": {"url": image_url_data}},
+                                    {"type": "image_url", "image_url": {"url": img_b64}},
                                 ],
                             })
                         else:
-                            messages_payload.append({"role": m["role"], "content": m["content"]})
+                            msg_vision.append({"role": m["role"], "content": m["content"]})
 
                     headers = {
                         "Authorization": f"Bearer {groq_key}",
@@ -439,19 +590,41 @@ elif st.session_state.page == "chat":
                     res = requests.post(
                         "https://api.groq.com/openai/v1/chat/completions",
                         headers=headers,
-                        json={"model": "meta-llama/llama-4-scout-17b-16e-instruct", "messages": messages_payload},
+                        json={"model": "meta-llama/llama-4-scout-17b-16e-instruct",
+                              "messages": msg_vision},
                         timeout=30,
                     )
+                    ai_response = (
+                        res.json()["choices"][0]["message"]["content"]
+                        if res.status_code == 200
+                        else f"❌ Error Groq Vision: {res.text}"
+                    )
 
-                    if res.status_code == 200:
-                        ai_response = res.json()["choices"][0]["message"]["content"]
-                    else:
-                        ai_response = f"❌ Error Groq Vision: {res.text}"
+                # ------------------------------------------------
+                # MESIN 3: KSMART + FILE DOKUMEN/KODE
+                #          → ekstrak teks → kirim ke AI sebagai konteks
+                # ------------------------------------------------
+                elif "KSmart" in selected_model and uploaded_file and get_file_ext(uploaded_file.name) in DOC_TYPES:
+                    file_content = extract_file_content(uploaded_file)
 
-                # --------------------------------------------------
-                # MESIN 3: SEMUA MODE TEKS (KBasic, KExpert, KListen,
-                #          KSmart tanpa foto) → Multi-provider fallback
-                # --------------------------------------------------
+                    msg_doc = []
+                    for i, m in enumerate(st.session_state.messages):
+                        if i == len(st.session_state.messages) - 1:
+                            # Inject konten file ke pesan terakhir
+                            combined = (
+                                f"{file_content}\n\n"
+                                f"--- Instruksi user ---\n{prompt}"
+                            )
+                            msg_doc.append({"role": "user", "content": combined})
+                        else:
+                            msg_doc.append({"role": m["role"], "content": m["content"]})
+
+                    ai_response = call_ai_fallback(msg_doc, selected_model)
+
+                # ------------------------------------------------
+                # MESIN 4: SEMUA MODE TEKS (KBasic, KExpert, KListen,
+                #          KSmart tanpa file) → multi-provider fallback
+                # ------------------------------------------------
                 else:
                     messages_payload = []
 
@@ -471,18 +644,64 @@ elif st.session_state.page == "chat":
                             ),
                         })
 
-                    # Mapping seluruh history ke payload
                     for m in st.session_state.messages:
                         messages_payload.append({"role": m["role"], "content": m["content"]})
 
-                    # Panggil dengan fallback otomatis
                     ai_response = call_ai_fallback(messages_payload, selected_model)
 
+                # ------------------------------------------------
+                # POST-PROCESSING: cek apakah perlu generate file
+                # ------------------------------------------------
+
+                # A) User minta Word document
+                if wants_word(prompt):
+                    if DOCX_OK:
+                        word_buf = create_word_doc(ai_response, title=f"KarAI — {prompt[:40]}")
+                        if word_buf:
+                            dl_key = f"word_{uuid.uuid4().hex[:8]}"
+                            st.session_state.downloads[dl_key] = {
+                                "label":    "📄 Download Word (.docx)",
+                                "data":     word_buf.getvalue(),
+                                "filename": "karai_dokumen.docx",
+                                "mime":     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            }
+                    else:
+                        ai_response += "\n\n*(Untuk generate Word, tambahkan `python-docx` ke requirements.txt)*"
+
+                # B) User minta file Python / ada code block di response
+                elif wants_code_file(prompt) or has_code_block(ai_response):
+                    code = extract_code_block(ai_response)
+                    if code:
+                        dl_key = f"code_{uuid.uuid4().hex[:8]}"
+                        # Tentukan ekstensi berdasarkan prompt
+                        ext_out = "js" if "file js" in prompt.lower() else "py"
+                        st.session_state.downloads[dl_key] = {
+                            "label":    f"🐍 Download kode (.{ext_out})",
+                            "data":     code.encode("utf-8"),
+                            "filename": f"karai_script.{ext_out}",
+                            "mime":     "text/plain",
+                        }
+
+                # ------------------------------------------------
                 # Tampilkan & simpan balasan AI
+                # ------------------------------------------------
                 with st.chat_message("assistant"):
                     render_ai_message(ai_response)
+                    if dl_key and dl_key in st.session_state.downloads:
+                        dl = st.session_state.downloads[dl_key]
+                        st.download_button(
+                            label     = dl["label"],
+                            data      = dl["data"],
+                            file_name = dl["filename"],
+                            mime      = dl["mime"],
+                            key       = f"dlbtn_new_{dl_key}",
+                        )
 
-                st.session_state.messages.append({"role": "assistant", "content": ai_response})
+                st.session_state.messages.append({
+                    "role":    "assistant",
+                    "content": ai_response,
+                    "dl_key":  dl_key,       # None kalau tidak ada file
+                })
                 save_chat(
                     st.session_state.user["email"],
                     st.session_state.messages,

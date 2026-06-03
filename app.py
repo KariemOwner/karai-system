@@ -439,7 +439,7 @@ elif st.session_state.page == "chat":
                     res = requests.post(
                         "https://api.groq.com/openai/v1/chat/completions",
                         headers=headers,
-                        json={"model": "llama-3.2-90b-vision-preview", "messages": messages_payload},
+                        json={"model": "meta-llama/llama-4-scout-17b-16e-instruct", "messages": messages_payload},
                         timeout=30,
                     )
 

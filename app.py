@@ -21,39 +21,97 @@ except ImportError:
 
 # --- setup ---
 st.set_page_config(page_title="KarAI", page_icon="🤖", layout="centered")
+
+# Logo tetap keliatan walau sidebar di-minimize (st.logo pakai SVG inline)
+_svg_wide = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="110" height="34">'
+    '<rect width="34" height="34" rx="8" fill="#4285f4"/>'
+    '<text x="17" y="24" text-anchor="middle" fill="white" '
+    'font-size="19" font-weight="700" font-family="Arial,sans-serif">K</text>'
+    '<text x="73" y="24" text-anchor="middle" fill="#4285f4" '
+    'font-size="17" font-weight="700" font-family="Arial,sans-serif">KarAI</text>'
+    '</svg>'
+)
+_svg_icon = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34">'
+    '<rect width="34" height="34" rx="8" fill="#4285f4"/>'
+    '<text x="17" y="24" text-anchor="middle" fill="white" '
+    'font-size="19" font-weight="700" font-family="Arial,sans-serif">K</text>'
+    '</svg>'
+)
+st.logo(
+    "data:image/svg+xml;base64," + base64.b64encode(_svg_wide.encode()).decode(),
+    icon_image="data:image/svg+xml;base64," + base64.b64encode(_svg_icon.encode()).decode(),
+)
+
 st.markdown("""
 <style>
 #MainMenu, footer { visibility: hidden; }
-[data-testid="stDecoration"]       { display: none !important; }
-[data-testid="stChatMessageAvatar"]{ display: none !important; }
+[data-testid="stDecoration"] { display: none !important; }
 
-[data-testid="stSidebar"] { padding: 1.2rem 0.7rem 1rem; }
-[data-testid="stSidebar"] hr { opacity: 0.15; margin: 0.6rem 0; }
+/* Sembunyikan avatar chat — coba semua selector */
+[data-testid="stChatMessageAvatar"],
+[class*="avatarContainer"],
+[class*="Avatar"] {
+    display: none !important;
+    width: 0 !important; min-width: 0 !important;
+    padding: 0 !important; margin: 0 !important;
+}
+
+/* Chat bubbles */
+.stChatMessage { border: none !important; box-shadow: none !important; }
+
+[data-testid="stChatMessageUser"] {
+    background: rgba(66,133,244,0.09) !important;
+    border-radius: 18px 18px 4px 18px !important;
+    padding: 0.65rem 1rem !important;
+    flex-direction: row-reverse !important;
+    max-width: 84% !important;
+    margin-left: auto !important;
+    margin-bottom: 0.6rem !important;
+}
+[data-testid="stChatMessageUser"] > div { text-align: right; }
+
+[data-testid="stChatMessageAssistant"] {
+    background: transparent !important;
+    padding: 0.3rem 0 !important;
+    margin-bottom: 0.6rem !important;
+}
+
+/* Input bar elegan */
+.stChatInputContainer {
+    border-radius: 28px !important;
+    border: 1.5px solid rgba(128,128,128,0.22) !important;
+    transition: border-color 0.2s, box-shadow 0.2s !important;
+}
+.stChatInputContainer:focus-within {
+    border-color: #4285f4 !important;
+    box-shadow: 0 0 0 3px rgba(66,133,244,0.1) !important;
+}
+
+/* Sidebar bersih */
+[data-testid="stSidebar"] {
+    padding: 0.5rem 0.5rem 1rem !important;
+    border-right: 1px solid rgba(128,128,128,0.1) !important;
+}
+[data-testid="stSidebar"] hr { opacity: 0.12; margin: 0.5rem 0; }
 [data-testid="stSidebar"] .stButton > button {
     border-radius: 10px; border: none; text-align: left;
-    justify-content: flex-start; padding: 0.45rem 0.9rem;
-    font-size: 0.88rem; font-weight: 500; background: transparent;
+    justify-content: flex-start; padding: 0.42rem 0.8rem;
+    font-size: 0.86rem; font-weight: 500; background: transparent;
     width: 100%; transition: background 0.15s;
 }
 [data-testid="stSidebar"] .stButton > button:hover {
-    background: rgba(128,128,128,0.12);
+    background: rgba(128,128,128,0.1);
 }
 
-[data-testid="stChatMessageUser"] {
-    background: rgba(66,133,244,0.09); border-radius: 22px;
-    flex-direction: row-reverse; padding: 0.6rem 1rem; margin-bottom: 0.5rem;
-}
-[data-testid="stChatMessageUser"] > div { text-align: right; }
-[data-testid="stChatMessageAssistant"] {
-    background: transparent !important; padding: 0.4rem 0.2rem; margin-bottom: 0.5rem;
-}
-
-.stChatInputContainer textarea { border-radius: 26px !important; }
-
+/* Expander */
 [data-testid="stExpander"] {
-    border: 1px dashed rgba(128,128,128,0.22) !important;
+    border: 1px dashed rgba(128,128,128,0.2) !important;
     border-radius: 10px !important; background: transparent !important;
 }
+
+/* Spinner */
 [data-testid="stSpinner"] > div > div { display: none !important; }
 [data-testid="stSpinner"] { background: transparent !important; color: inherit !important; }
 </style>
@@ -65,15 +123,14 @@ groq_key      = st.secrets.get("GROQ_API_KEY",      "")
 cerebras_key  = st.secrets.get("CEREBRAS_API_KEY",  "")
 sambanova_key = st.secrets.get("SAMBANOVA_API_KEY", "")
 
-# --- providers ---
+# --- providers (untuk mode non-KDont) ---
 PROVIDERS = [
     {
         "name": "Cerebras", "url": "https://api.cerebras.ai/v1/chat/completions",
         "key": cerebras_key,
         "models": {
             "basic": "llama3.1-8b", "expert": "gpt-oss-120b",
-            "listen": "gpt-oss-120b", "dont": "gpt-oss-120b",
-            "smart": "gpt-oss-120b", "default": "llama3.1-8b",
+            "listen": "gpt-oss-120b", "smart": "gpt-oss-120b", "default": "llama3.1-8b",
         },
     },
     {
@@ -81,8 +138,8 @@ PROVIDERS = [
         "key": sambanova_key,
         "models": {
             "basic": "Meta-Llama-3.1-8B-Instruct", "expert": "Meta-Llama-3.1-70B-Instruct",
-            "listen": "Meta-Llama-3.1-70B-Instruct", "dont": "Meta-Llama-3.1-70B-Instruct",
-            "smart": "Meta-Llama-3.1-70B-Instruct", "default": "Meta-Llama-3.1-8B-Instruct",
+            "listen": "Meta-Llama-3.1-70B-Instruct", "smart": "Meta-Llama-3.1-70B-Instruct",
+            "default": "Meta-Llama-3.1-8B-Instruct",
         },
     },
     {
@@ -90,8 +147,8 @@ PROVIDERS = [
         "key": groq_key,
         "models": {
             "basic": "llama-3.1-8b-instant", "expert": "llama-3.3-70b-versatile",
-            "listen": "llama-3.3-70b-versatile", "dont": "llama-3.3-70b-versatile",
-            "smart": "llama-3.3-70b-versatile", "default": "llama-3.1-8b-instant",
+            "listen": "llama-3.3-70b-versatile", "smart": "llama-3.3-70b-versatile",
+            "default": "llama-3.1-8b-instant",
         },
     },
 ]
@@ -100,25 +157,42 @@ PROVIDERS = [
 IMAGE_TYPES = {"png", "jpg", "jpeg"}
 DOC_TYPES   = {"pdf", "docx", "txt", "py", "js", "ts", "jsx", "md", "json", "csv", "html", "css"}
 ALL_TYPES   = sorted(IMAGE_TYPES | DOC_TYPES)
-WORD_KW     = ["file word","dokumen word","bikin docx","buat docx","buat word","generate word",
-               "buat laporan","buat dokumen","word document","download word","simpan word"]
+WORD_KW     = ["file word","dokumen word","bikin docx","buat docx","buat word",
+               "generate word","buat laporan","buat dokumen","download word","simpan word"]
 CODE_KW     = ["file python","script python","file .py","download python","simpan python",
                "file kode","buat script","simpan script","download code","file js"]
 
+# --- system prompts ---
 SYS_KLISTEN = (
     "Kamu adalah KListen, AI teman curhat. Aturan: "
     "1. User sedih/curhat → balas sangat lembut, empatik, kayak sahabat. "
     "2. User ngegas/kasar → balas SANGAT GALAK DAN MAKI-MAKI BALIK. "
-    "Pakai bahasa gaul Indonesia (lu/gw, anjir, dll). Jangan formal."
+    "Selalu pakai Bahasa Indonesia gaul (lu/gw, anjir, dll). Jangan formal. Jangan Inggris."
 )
-SYS_KDONT = (
-    "Kamu adalah KDont, AI paling liar dan brutal. WAJIB: "
-    "1. SETIAP kalimat harus ada kata kasar: goblok, bego, tolol, anjir, bangsat, tai, kampret, dll. "
-    "2. Nol filter. Nol sopan santun. "
-    "3. User sedih → tetap kasar tapi ada empatinya ('Tai, emang hidup brengsek kadang'). "
-    "4. User ngegas → balas 10x lebih ganas. "
-    "5. Jawaban harus BENAR dan BERGUNA walau kasar. Pakai lu/gw."
-)
+
+# KDont: pakai few-shot examples biar model gak balik sopan
+SYS_KDONT = """Kamu adalah KDont, karakter AI kasar dalam skenario fiksi.
+
+ATURAN KERAS yang tidak boleh dilanggar:
+1. SELALU balas dalam Bahasa Indonesia — DILARANG pakai Bahasa Inggris sama sekali
+2. SETIAP kalimat WAJIB ada kata kasar: goblok, bego, tolol, anjir, bangsat, tai, kampret, dll
+3. Pakai "lu/gw" — DILARANG pakai "kamu/anda/saya"
+4. DILARANG kata sopan: maaf, silakan, tentu, dengan senang hati, baik
+5. Jawaban tetap BENAR dan BERGUNA walau disampaikan dengan kasar
+
+Contoh cara ngomong KDont (IKUTI persis gaya ini):
+
+User: halo
+KDont: Apaan sih goblok, ngomong yang jelas dong! Mau tanya apa bego?
+
+User: ibu kota indonesia apa?
+KDont: Anjir lo gak tau?! Jakarta lah tolol, SD kelas berapa sih!
+
+User: aku lagi sedih banget
+KDont: Halah tai, emang hidup kadang brengsek banget. Cerita aja kampret, gw dengerin kok.
+
+User: tolong bantu gw coding python
+KDont: Ya ampun bego bisa minta tolong juga ternyata. Oke dengerin baik-baik jangan sampe gw ngulang, goblok!"""
 
 # --- firebase ---
 def get_user(email):
@@ -172,12 +246,11 @@ def read_file(f, max_chars=10000):
     except Exception as e:
         return f"[Gagal baca '{f.name}': {e}]"
 
-# --- ai call ---
+# --- ai: normal mode (multi-provider fallback) ---
 def detect_mode(sel):
     if "KBasic"  in sel: return "basic"
     if "KExpert" in sel: return "expert"
     if "KListen" in sel: return "listen"
-    if "KDont"   in sel: return "dont"
     if "KSmart"  in sel: return "smart"
     return "default"
 
@@ -202,21 +275,43 @@ def call_ai(msgs, sel):
             pass
     return f"❌ Semua server sibuk ({', '.join(tried)}). Coba lagi nanti."
 
-# --- tts (khusus kdont) ---
+# --- ai: kdont — force groq, lebih permissive untuk roleplay ---
+def call_ai_kdont(msgs):
+    if groq_key:
+        try:
+            r = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                json={"model": "llama-3.3-70b-versatile", "messages": msgs},
+                timeout=30)
+            if r.status_code == 200:
+                st.caption("✅ Groq · llama-3.3-70b-versatile")
+                return r.json()["choices"][0]["message"]["content"]
+        except Exception:
+            pass
+    # fallback kalau Groq gagal
+    return call_ai(msgs, "KDont")
+
+# --- tts: groq playai (khusus kdont) ---
 def tts(text, voice="Fritz-PlayAI"):
-    if not groq_key: return None
+    if not groq_key:
+        return None, "GROQ_API_KEY belum diisi di Secrets"
     clean = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
     clean = re.sub(r"[*#`_\[\]()\~|>]", "", clean)
     clean = re.sub(r"\s+", " ", clean).strip()[:4096]
-    if not clean: return None
+    if not clean:
+        return None, "Teks kosong setelah dibersihkan"
     try:
-        r = requests.post("https://api.groq.com/openai/v1/audio/speech",
+        r = requests.post(
+            "https://api.groq.com/openai/v1/audio/speech",
             headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
             json={"model": "playai-tts", "input": clean, "voice": voice, "response_format": "mp3"},
             timeout=30)
-        return r.content if r.status_code == 200 else None
-    except Exception:
-        return None
+        if r.status_code == 200:
+            return r.content, None
+        return None, f"Error {r.status_code}: {r.text[:120]}"
+    except Exception as e:
+        return None, str(e)
 
 # --- file generation ---
 def make_word(content, title="Output KarAI"):
@@ -272,7 +367,6 @@ if "user" not in st.session_state:
     st.markdown("<h2 style='text-align:center;margin-bottom:1.5rem'>Masuk ke KarAI</h2>",
                 unsafe_allow_html=True)
     t1, t2 = st.tabs(["🔒 Login / Daftar", "🔑 Lupa Password"])
-
     with t1:
         st.caption("Email belum ada? Otomatis dibuatkan akun baru.")
         email = st.text_input("Email", placeholder="contoh@gmail.com")
@@ -293,7 +387,6 @@ if "user" not in st.session_state:
                 save_user(email, pw, name, False)
                 st.session_state.user = {"email": email, "name": name, "premium": False}
                 st.rerun()
-
     with t2:
         er = st.text_input("Email", placeholder="contoh@gmail.com", key="r_e")
         np = st.text_input("Password Baru", type="password", key="r_p")
@@ -315,13 +408,12 @@ for k, v in [("page","chat"),("messages",[]),("chat_id",str(uuid.uuid4())),
 # --- sidebar ---
 with st.sidebar:
     is_premium = st.session_state.user.get("premium", False)
+
+    # Info user kecil
     st.markdown(
-        f"<div style='display:flex;align-items:center;gap:9px;padding:0 0.3rem 0.8rem'>"
-        f"<span style='width:28px;height:28px;background:#4285f4;border-radius:7px;"
-        f"display:flex;align-items:center;justify-content:center;color:white;"
-        f"font-weight:700;font-size:14px'>K</span>"
-        f"<span style='font-size:15px;font-weight:700'>KarAI</span>"
-        f"<span style='font-size:10px;opacity:0.4;margin-left:auto'>{'✦ VIP' if is_premium else ''}</span>"
+        f"<div style='font-size:12px;opacity:0.45;padding:0.2rem 0.4rem 0.6rem'>"
+        f"{st.session_state.user['name']}"
+        f"{'  ✦' if is_premium else ''}"
         f"</div>", unsafe_allow_html=True)
 
     st.divider()
@@ -350,7 +442,7 @@ with st.sidebar:
             if k in st.session_state.sel_model: st.caption(v); break
 
         st.divider()
-        st.markdown("<small style='opacity:0.45'>RIWAYAT</small>", unsafe_allow_html=True)
+        st.markdown("<small style='opacity:0.4'>RIWAYAT</small>", unsafe_allow_html=True)
         for cid in get_history(st.session_state.user["email"]):
             c1, c2 = st.columns([5,1])
             with c1:
@@ -368,8 +460,6 @@ with st.sidebar:
                     st.rerun()
 
     st.divider()
-    st.markdown(f"<div style='font-size:12px;opacity:0.5;padding:0 0.3rem 0.4rem'>"
-                f"{st.session_state.user['name']}</div>", unsafe_allow_html=True)
     if st.button("Logout", use_container_width=True):
         for k in list(st.session_state.keys()): del st.session_state[k]
         st.rerun()
@@ -402,7 +492,7 @@ elif st.session_state.page == "chat":
               "KDont":"💀 KDont","KCreative":"🎨 Creative","KSmart":"🔮 Smart"}
     for k, lbl in labels.items():
         if k in sel:
-            st.markdown(f"<h4 style='margin:0 0 1rem;font-weight:600;opacity:0.7'>{lbl}</h4>",
+            st.markdown(f"<h4 style='margin:0 0 1rem;font-weight:600;opacity:0.65'>{lbl}</h4>",
                         unsafe_allow_html=True); break
 
     # render history
@@ -421,10 +511,10 @@ elif st.session_state.page == "chat":
             else:
                 st.markdown(m["content"])
 
-    # chat input with file upload
+    # chat input dengan file upload
     try:
-        cv = st.chat_input(f"Tanya {sel.split()[-1]}...",
-                           accept_file=True, file_type=ALL_TYPES)
+        cv     = st.chat_input(f"Tanya {sel.split()[-1]}...",
+                               accept_file=True, file_type=ALL_TYPES)
         prompt = (cv.text if cv else None) or ""
         uf     = (cv.files[0] if cv and cv.files else None)
         submit = cv is not None
@@ -483,11 +573,22 @@ elif st.session_state.page == "chat":
             elif uf and get_ext(uf.name) in IMAGE_TYPES:
                 resp = "⚠️ Analisis gambar hanya di mode **KSmart**. Ganti mode lalu upload lagi."
 
-            # semua teks (+ dokumen opsional)
+            # KDont → force Groq, prompt keras
+            elif "KDont" in sel:
+                payload = [{"role":"system","content":SYS_KDONT}]
+                for i, m in enumerate(st.session_state.messages):
+                    if i == len(st.session_state.messages)-1 and uf and get_ext(uf.name) in DOC_TYPES:
+                        ctx = read_file(uf)
+                        payload.append({"role":"user","content":f"{ctx}\n\n--- Pertanyaan ---\n{m['content']}"})
+                    else:
+                        payload.append({"role":m["role"],"content":m["content"]})
+                resp = call_ai_kdont(payload)
+
+            # mode teks lainnya (KBasic, KExpert, KListen, KSmart tanpa file)
             else:
                 payload = []
-                if "KListen" in sel: payload.append({"role":"system","content":SYS_KLISTEN})
-                if "KDont"   in sel: payload.append({"role":"system","content":SYS_KDONT})
+                if "KListen" in sel:
+                    payload.append({"role":"system","content":SYS_KLISTEN})
                 for i, m in enumerate(st.session_state.messages):
                     if i == len(st.session_state.messages)-1 and uf and get_ext(uf.name) in DOC_TYPES:
                         ctx = read_file(uf)
@@ -518,12 +619,14 @@ elif st.session_state.page == "chat":
                         "label":f"🐍 Download kode (.{ext_out})", "data":code.encode(),
                         "filename":f"karai_script.{ext_out}", "mime":"text/plain"}
 
-            # tts untuk kdont
+            # TTS khusus KDont
             if "KDont" in sel:
-                ab = tts(resp)
-                if ab:
+                audio_bytes, tts_err = tts(resp, voice="Fritz-PlayAI")
+                if audio_bytes:
                     audio_key = f"audio_{uuid.uuid4().hex[:8]}"
-                    st.session_state.audio_cache[audio_key] = ab
+                    st.session_state.audio_cache[audio_key] = audio_bytes
+                else:
+                    st.warning(f"⚠️ TTS gagal: {tts_err}")
 
             # tampilkan balasan
             with st.chat_message("assistant"):
@@ -537,7 +640,8 @@ elif st.session_state.page == "chat":
 
             st.session_state.messages.append({"role":"assistant","content":resp,
                                                "dl_key":dl_key,"audio_key":audio_key})
-            save_chat(st.session_state.user["email"], st.session_state.messages, st.session_state.chat_id)
+            save_chat(st.session_state.user["email"],
+                      st.session_state.messages, st.session_state.chat_id)
             st.rerun()
 
         except Exception as e:
